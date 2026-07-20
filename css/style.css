@@ -313,6 +313,26 @@ img{ max-width:100%; }
 .next-verse-fab .nv-ref{ font-size:.62rem; font-weight:700; }
 .next-verse-fab:active{ transform: scale(.94); }
 
+/* Right-edge vertical scroll thumb — vertical mode only, for fast drag-scrubbing
+   through many verses at once (phones hide the native scrollbar, so we draw one). */
+.vscroll-track{
+  position: fixed; top: 108px; bottom: 148px; right: 2px; width: 26px; z-index: 34;
+}
+.vscroll-thumb{
+  position:absolute; right: 6px; top: 0; width: 6px; height: 44px;
+  background: var(--ink-soft); opacity:.4; border-radius: 4px;
+  transform: translateY(-50%);
+  transition: opacity .15s, width .15s, background .15s;
+}
+.vscroll-thumb.dragging{ opacity:1; background: var(--orange); width:9px; }
+.vscroll-label{
+  position:absolute; right: 22px; top:0; transform: translateY(-50%);
+  background: var(--ink); color: var(--sky); font-size:.74rem; font-weight:700;
+  padding:.25rem .6rem; border-radius:10px; white-space:nowrap;
+  opacity:0; transition:opacity .15s; pointer-events:none;
+}
+.vscroll-label.show{ opacity:1; }
+
 /* ---------- Bottom position scrubber (Kotatsu-style) ---------- */
 .scrub-bar{
   position: sticky; bottom: 0; z-index: 30;

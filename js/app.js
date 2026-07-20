@@ -435,7 +435,11 @@ function openSettingsSheet(){
   const dv = overlay.querySelector('#toggle-dividers');
   if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); close(); openSettingsSheet(); };
   overlay.querySelectorAll('[data-tika]').forEach(cb => cb.onchange = () => {
-    settings.tikas[cb.dataset.tika] = cb.checked; saveSettings(settings); refreshReaderIfOpen();
+    settings.tikas[cb.dataset.tika] = cb.checked;
+    // Ticking a tika should show it immediately — don't make the user separately
+    // hunt for a mode switch in another menu just to see what they just selected.
+    if(cb.checked) settings.contentMode = 'tika';
+    saveSettings(settings); refreshReaderIfOpen();
   });
 }
 function refreshReaderIfOpen(){ if(window.__vvRenderReader) window.__vvRenderReader(); else render(); }

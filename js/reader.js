@@ -211,7 +211,11 @@ function renderReader(app, book, skandhNum, startChapterKey){
     <button class="next-verse-fab" id="nextVerseFab" title="अगला श्लोक — टैप करें">
       <span class="nv-arrow">⌄</span>
       <span class="nv-ref" id="nvRef">…</span>
-    </button>` : ''}
+    </button>
+    <div class="vscroll-track" id="vscrollTrack">
+      <div class="vscroll-label" id="vscrollLabel"></div>
+      <div class="vscroll-thumb" id="vscrollThumb"></div>
+    </div>` : ''}
     <div class="scrub-bar" id="scrubBar">
       <button class="nav-btn" id="prevChBtn" title="Previous chapter">⏮</button>
       <div class="scrub-track-wrap">
@@ -226,6 +230,9 @@ function renderReader(app, book, skandhNum, startChapterKey){
   const content = document.getElementById('reader-content');
   const nextVerseFab = document.getElementById('nextVerseFab');
   const nvRef = document.getElementById('nvRef');
+  const vscrollTrack = document.getElementById('vscrollTrack');
+  const vscrollThumb = document.getElementById('vscrollThumb');
+  const vscrollLabel = document.getElementById('vscrollLabel');
 
   // jumpTo(chKey, verseIdx, behavior) and an onScrollPosition callback get set by whichever branch runs below
   let jumpTo = () => {};
@@ -359,7 +366,14 @@ function renderReader(app, book, skandhNum, startChapterKey){
     prevChBtn.disabled = idx <= 0;
     nextChBtn.disabled = idx < 0 || idx >= chapters.length - 1;
   }
-  function setScrub(idx, n){ scrubRange.value = idx; positionLabel(idx, n); }
+  function positionVThumb(idx, n){
+    if(!vscrollThumb) return;
+    const pct = n <= 1 ? 0 : (idx/(n-1))*100;
+    vscrollThumb.style.top = pct + '%';
+    vscrollLabel.style.top = pct + '%';
+    vscrollLabel.textContent = verseRefLabel(book, currentKey, (chapters.find(c=>c.key===currentKey).data.verses[idx]||{}).num || '');
+  }
+  function setScrub(idx, n){ scrubRange.value = idx; positionLabel(idx, n); positionVThumb(idx, n); }
   function jumpToChapterStart(chKey){
     refreshScrubForChapter(chKey);
     setScrub(0, chapters.find(c=>c.key===chKey).data.verses.length);
@@ -412,6 +426,44 @@ function renderReader(app, book, skandhNum, startChapterKey){
   nextChBtn.onclick = () => { const idx = chapters.findIndex(c=>c.key===currentKey); if(idx>=0 && idx<chapters.length-1) jumpToChapterStart(chapters[idx+1].key); };
   chListBtn.onclick = () => openChapterListSheet(app, book, skandhNum, chapters, currentKey, (key) => jumpToChapterStart(key));
 
+  /* ---- Right-edge vertical scroll thumb — fast drag-to-scrub for vertical mode,
+     same idea as a desktop scrollbar handle, since phones hide the native one. ---- */
+  if(vscrollTrack && vscrollThumb){
+    let vDragging = false;
+    function idxFromClientY(clientY){
+      const rect = vscrollTrack.getBoundingClientRect();
+      const frac = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+      const n = chapters.find(c=>c.key===currentKey).data.verses.length;
+      return { idx: Math.round(frac * (n-1)), n };
+    }
+    function onMove(e){
+      if(!vDragging) return;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const { idx, n } = idxFromClientY(clientY);
+      setScrub(idx, n);
+      jumpTo(currentKey, idx, 'auto');
+    }
+    function endDrag(){
+      if(!vDragging) return;
+      vDragging = false; scrubDragging = false;
+      vscrollThumb.classList.remove('dragging'); vscrollLabel.classList.remove('show');
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', endDrag);
+    }
+    function startDrag(e){
+      vDragging = true; scrubDragging = true;
+      vscrollThumb.classList.add('dragging'); vscrollLabel.classList.add('show');
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', endDrag);
+      onMove(e);
+      e.preventDefault();
+    }
+    vscrollTrack.addEventListener('touchstart', startDrag, { passive: false });
+    vscrollTrack.addEventListener('touchmove', onMove, { passive: false });
+    vscrollTrack.addEventListener('touchend', endDrag);
+    vscrollTrack.addEventListener('mousedown', startDrag);
+  }
+
   window.__vvRenderReader = () => renderReader(app, book, skandhNum, currentKey);
 }
 
@@ -429,6 +481,17 @@ function openChapterListSheet(app, book, skandhNum, chapters, currentKey, onPick
         </div>
       </div>
       <div class="setting-row">
+        <label>टीकाएँ / Commentaries — टिक करते ही टीका मोड चालू हो जाएगा</label>
+        <div class="tika-list">
+          ${TIKA_DEFS.map(t => `
+            <label class="tika-row ${t.available?'':'disabled'}">
+              <input type="checkbox" data-sheet-tika="${t.key}" ${settings.tikas[t.key]?'checked':''} ${t.available?'':'disabled'}>
+              <span class="t-label">${t.label}</span>
+              <span class="t-sub">${t.sub}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+      <div class="setting-row">
         <label>अध्याय सूची / Chapters</label>
         ${chapters.map(c => `<button class="chlist-item ${c.key===currentKey?'current':''}" data-key="${c.key}">${c.label}</button>`).join('')}
       </div>
@@ -438,6 +501,13 @@ function openChapterListSheet(app, book, skandhNum, chapters, currentKey, onPick
   overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
   overlay.querySelector('.close-x').onclick = () => overlay.remove();
   overlay.querySelectorAll('[data-key]').forEach(b => b.onclick = () => { overlay.remove(); onPick(b.dataset.key); });
+  overlay.querySelectorAll('[data-sheet-tika]').forEach(cb => cb.onchange = () => {
+    settings.tikas[cb.dataset.sheetTika] = cb.checked;
+    if(cb.checked) settings.contentMode = 'tika';
+    saveSettings(settings);
+    overlay.remove();
+    renderReader(app, book, skandhNum, currentKey);
+  });
   overlay.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
     settings.contentMode = b.dataset.m; saveSettings(settings);
     overlay.remove();
