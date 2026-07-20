@@ -345,6 +345,24 @@ function renderReader(app, book, skandhNum, startChapterKey){
   }
   wireVerseCardActions(app, verseIndex);
 
+  /* ---- Whole-book verse index — lets the right-edge scroll pad represent
+     position across all of `chapters` (the entire book, for a non-skandh
+     book like the Gita) instead of just the chapter currently in view. The
+     bottom scrub-bar stays chapter-relative on purpose (prev/next-chapter
+     buttons, "verse X of N in this chapter"); only the pad is book-wide. ---- */
+  const chapterOffset = {};
+  let totalVerses = 0;
+  chapters.forEach(ch => { chapterOffset[ch.key] = totalVerses; totalVerses += ch.data.verses.length; });
+  function globalIndexOf(chKey, idxInCh){ return chapterOffset[chKey] + idxInCh; }
+  function chapterForGlobalIndex(gIdx){
+    for(const ch of chapters){
+      const n = ch.data.verses.length;
+      if(gIdx < chapterOffset[ch.key] + n) return { chKey: ch.key, idxInCh: gIdx - chapterOffset[ch.key] };
+    }
+    const last = chapters[chapters.length-1];
+    return { chKey: last.key, idxInCh: last.data.verses.length - 1 };
+  }
+
   /* ---- Position scrubber: chapter-relative, two-way synced with reading position ---- */
   const scrubRange = document.getElementById('scrubRange');
   const scrubLabel = document.getElementById('scrubLabel');
@@ -369,14 +387,16 @@ function renderReader(app, book, skandhNum, startChapterKey){
     prevChBtn.disabled = idx <= 0;
     nextChBtn.disabled = idx < 0 || idx >= chapters.length - 1;
   }
-  function positionVThumb(idx, n){
+  function positionVThumb(chKey, idxInCh){
     if(!vscrollThumb) return;
-    const pct = n <= 1 ? 0 : (idx/(n-1))*100;
+    const gIdx = globalIndexOf(chKey, idxInCh);
+    const pct = totalVerses <= 1 ? 0 : (gIdx/(totalVerses-1))*100;
     vscrollThumb.style.top = pct + '%';
     vscrollLabel.style.top = pct + '%';
-    vscrollLabel.textContent = verseRefLabel(book, currentKey, (chapters.find(c=>c.key===currentKey).data.verses[idx]||{}).num || '');
+    const ch = chapters.find(c=>c.key===chKey);
+    vscrollLabel.textContent = verseRefLabel(book, chKey, (ch && ch.data.verses[idxInCh] || {}).num || '');
   }
-  function setScrub(idx, n){ scrubRange.value = idx; positionLabel(idx, n); positionVThumb(idx, n); }
+  function setScrub(idx, n){ scrubRange.value = idx; positionLabel(idx, n); positionVThumb(currentKey, idx); }
   function jumpToChapterStart(chKey){
     refreshScrubForChapter(chKey);
     setScrub(0, chapters.find(c=>c.key===chKey).data.verses.length);
@@ -440,6 +460,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
     const idx = parseInt(scrubRange.value, 10);
     const n = chapters.find(c=>c.key===currentKey).data.verses.length;
     positionLabel(idx, n);
+    positionVThumb(currentKey, idx);
     jumpTo(currentKey, idx, 'auto');
   });
   const endDrag = () => { scrubDragging = false; scrubLabel.classList.remove('show'); };
@@ -455,18 +476,19 @@ function renderReader(app, book, skandhNum, startChapterKey){
      same idea as a desktop scrollbar handle, since phones hide the native one. ---- */
   if(vscrollTrack && vscrollThumb){
     let vDragging = false;
-    function idxFromClientY(clientY){
+    function targetFromClientY(clientY){
       const rect = vscrollTrack.getBoundingClientRect();
       const frac = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
-      const n = chapters.find(c=>c.key===currentKey).data.verses.length;
-      return { idx: Math.round(frac * (n-1)), n };
+      const gIdx = Math.round(frac * (totalVerses - 1));
+      return chapterForGlobalIndex(gIdx);
     }
     function onMove(e){
       if(!vDragging) return;
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      const { idx, n } = idxFromClientY(clientY);
-      setScrub(idx, n);
-      jumpTo(currentKey, idx, 'auto');
+      const { chKey, idxInCh } = targetFromClientY(clientY);
+      if(chKey !== currentKey){ setCurrentChapter(chKey); refreshScrubForChapter(chKey); }
+      setScrub(idxInCh, chapters.find(c=>c.key===chKey).data.verses.length);
+      jumpTo(chKey, idxInCh, 'auto');
     }
     function endDrag(){
       if(!vDragging) return;
