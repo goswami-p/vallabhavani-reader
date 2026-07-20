@@ -63,8 +63,8 @@ function renderReader(app, book, skandhNum, startChapterKey){
     </div>
     <div class="reader-toolbar">
       <div class="mode-toggle" id="mode-toggle">
-        <button data-mode="vertical" class="${settings.readingMode==='vertical'?'active':''}">⬇️ वर्टिकल</button>
-        <button data-mode="horizontal" class="${settings.readingMode==='horizontal'?'active':''}">➡️ हॉरिज़ॉन्टल</button>
+        <button data-mode="vertical" class="${settings.readingMode==='vertical'?'active':''}">⬇️ वर्टिकल स्क्रोल</button>
+        <button data-mode="horizontal" class="${settings.readingMode==='horizontal'?'active':''}">📖 बुक मोड (पेज पलटें)</button>
       </div>
     </div>
     <div id="reader-root"></div>
@@ -117,51 +117,139 @@ function renderReader(app, book, skandhNum, startChapterKey){
   const verseIndex = {};
   chapters.forEach(ch => ch.data.verses.forEach(v => verseIndex[`${ch.key}-${v.num}`] = v));
 
-  if(settings.readingMode === 'horizontal'){
-    const pages = [];
-    chapters.forEach(ch => ch.data.verses.forEach(v => pages.push({ ch, v })));
-    root.innerHTML = `
-      <div class="verse-pager" id="pager">
-        ${pages.map(p => `<div class="page">${verseCardHtml(p.v, { chapterKey: p.ch.key, chapterLabel: p.ch.label })}</div>`).join('')}
+  root.innerHTML = `
+    <div id="reader-content"></div>
+    <div class="scrub-bar" id="scrubBar">
+      <button class="nav-btn" id="prevChBtn" title="Previous chapter">⏮</button>
+      <div class="scrub-track-wrap">
+        <div class="scrub-label" id="scrubLabel">1</div>
+        <input type="range" class="scrub-range" id="scrubRange" min="0" max="0" value="0" step="1">
+        <div class="scrub-dots" id="scrubDots"></div>
       </div>
-      <div class="page-dots" id="dots">${pages.map((_,i)=>`<span data-i="${i}"></span>`).join('')}</div>
-    `;
-    wireVerseCardActions(app, verseIndex);
-    const pager = document.getElementById('pager');
-    const dots = document.getElementById('dots').children;
+      <button class="nav-btn" id="nextChBtn" title="Next chapter">⏭</button>
+      <button class="chlist-btn" id="chListBtn" title="Chapter list">☰</button>
+    </div>
+  `;
+  const content = document.getElementById('reader-content');
 
+  let pager = null, feed = null, pages = null;
+
+  if(settings.readingMode === 'horizontal'){
+    pages = [];
+    chapters.forEach(ch => ch.data.verses.forEach(v => pages.push({ ch, v })));
+    content.innerHTML = `<div class="verse-pager" id="pager">
+      ${pages.map(p => `<div class="page">${verseCardHtml(p.v, { chapterKey: p.ch.key, chapterLabel: p.ch.label })}</div>`).join('')}
+    </div>`;
+    pager = document.getElementById('pager');
     const startIdx = Math.max(0, pages.findIndex(p => p.ch.key === startKey));
     pager.scrollLeft = startIdx * pager.clientWidth;
-
-    function updateActive(){
-      const idx = Math.round(pager.scrollLeft / pager.clientWidth);
-      Array.from(dots).forEach((d,i) => d.classList.toggle('active', i===idx));
-      if(pages[idx]){ setCurrentChapter(pages[idx].ch.key); saveScopeBookmark(book, skandhNum, pages[idx].ch, scopeLabel); }
-    }
-    pager.addEventListener('scroll', debounce(updateActive, 150));
-    updateActive();
   } else {
-    root.innerHTML = `<div class="verse-feed ${settings.pageDividers?'':'no-dividers'}" id="feed"></div>`;
-    const feed = document.getElementById('feed');
+    content.innerHTML = `<div class="verse-feed ${settings.pageDividers?'':'no-dividers'}" id="feed"></div>`;
+    feed = document.getElementById('feed');
     let html = '';
     chapters.forEach(ch => {
       html += `<div class="chapter-break" data-chkey="${ch.key}">${ch.label}</div>`;
       ch.data.verses.forEach(v => { html += verseCardHtml(v, { chapterKey: ch.key, chapterLabel: '' }); });
     });
     feed.innerHTML = html;
-    wireVerseCardActions(app, verseIndex);
-
     const startBreak = feed.querySelector(`.chapter-break[data-chkey="${startKey}"]`);
     if(startBreak) startBreak.scrollIntoView({ block: 'start' });
+  }
+  wireVerseCardActions(app, verseIndex);
 
+  /* ---- Position scrubber: chapter-relative, two-way synced with reading position ---- */
+  const scrubRange = document.getElementById('scrubRange');
+  const scrubLabel = document.getElementById('scrubLabel');
+  const scrubDots = document.getElementById('scrubDots');
+  const prevChBtn = document.getElementById('prevChBtn');
+  const nextChBtn = document.getElementById('nextChBtn');
+  const chListBtn = document.getElementById('chListBtn');
+  let scrubDragging = false;
+
+  function positionLabel(idx, n){
+    scrubLabel.textContent = (idx+1) + ' / ' + n;
+    const pct = n <= 1 ? 0 : (idx/(n-1))*100;
+    scrubLabel.style.left = pct + '%';
+  }
+  function refreshScrubForChapter(key){
+    const ch = chapters.find(c => c.key === key);
+    const n = ch ? ch.data.verses.length : 0;
+    scrubRange.max = Math.max(0, n-1);
+    const dotCount = Math.min(n, 16);
+    scrubDots.innerHTML = Array.from({length: dotCount}, () => '<span></span>').join('');
+    const idx = chapters.findIndex(c => c.key === key);
+    prevChBtn.disabled = idx <= 0;
+    nextChBtn.disabled = idx < 0 || idx >= chapters.length - 1;
+  }
+  function jumpToVerseInChapter(chKey, verseIdx, behavior){
+    const ch = chapters.find(c => c.key === chKey);
+    if(!ch) return;
+    const v = ch.data.verses[verseIdx];
+    if(!v) return;
+    if(pager){
+      const pIdx = pages.findIndex(p => p.ch.key === chKey && p.v.num === v.num);
+      if(pIdx >= 0) pager.scrollTo({ left: pIdx * pager.clientWidth, behavior: behavior || 'auto' });
+    } else if(feed){
+      const card = feed.querySelector(`[data-vkey="${chKey}-${v.num}"]`);
+      if(card) card.scrollIntoView({ block: 'start', behavior: behavior || 'auto' });
+    }
+    setCurrentChapter(chKey);
+  }
+  function jumpToChapterStart(chKey){
+    refreshScrubForChapter(chKey);
+    setScrub(0, chapters.find(c=>c.key===chKey).data.verses.length);
+    jumpToVerseInChapter(chKey, 0, 'smooth');
+  }
+  function setScrub(idx, n){ scrubRange.value = idx; positionLabel(idx, n); }
+
+  refreshScrubForChapter(currentKey);
+  setScrub(0, chapters.find(c=>c.key===currentKey).data.verses.length);
+
+  scrubRange.addEventListener('input', () => {
+    scrubDragging = true;
+    scrubLabel.classList.add('show');
+    const idx = parseInt(scrubRange.value, 10);
+    const n = chapters.find(c=>c.key===currentKey).data.verses.length;
+    positionLabel(idx, n);
+    jumpToVerseInChapter(currentKey, idx, 'auto');
+  });
+  const endDrag = () => { scrubDragging = false; scrubLabel.classList.remove('show'); };
+  scrubRange.addEventListener('change', endDrag);
+  scrubRange.addEventListener('blur', endDrag);
+  scrubRange.addEventListener('touchend', endDrag);
+
+  prevChBtn.onclick = () => { const idx = chapters.findIndex(c=>c.key===currentKey); if(idx>0) jumpToChapterStart(chapters[idx-1].key); };
+  nextChBtn.onclick = () => { const idx = chapters.findIndex(c=>c.key===currentKey); if(idx>=0 && idx<chapters.length-1) jumpToChapterStart(chapters[idx+1].key); };
+  chListBtn.onclick = () => openChapterListSheet(chapters, currentKey, (key) => jumpToChapterStart(key));
+
+  /* ---- Wire live reading-position tracking back into the scrubber + header + bookmarks ---- */
+  if(pager){
+    function updateFromPager(){
+      const idx = Math.round(pager.scrollLeft / pager.clientWidth);
+      const p = pages[idx];
+      if(!p) return;
+      if(p.ch.key !== currentKey) refreshScrubForChapter(p.ch.key);
+      setCurrentChapter(p.ch.key);
+      const vIdx = p.ch.data.verses.findIndex(v => v.num === p.v.num);
+      if(!scrubDragging) setScrub(vIdx, p.ch.data.verses.length);
+      saveScopeBookmark(book, skandhNum, p.ch, scopeLabel);
+    }
+    pager.addEventListener('scroll', debounce(updateFromPager, 150));
+  } else if(feed){
     const cards = feed.querySelectorAll('.verse-card');
     if(window.IntersectionObserver){
       const io = new IntersectionObserver((entries) => {
         entries.forEach(e => {
           if(e.isIntersecting){
-            const key = e.target.dataset.chkey;
-            const ch = chapters.find(c => c.key === key);
-            if(ch){ setCurrentChapter(key); saveScopeBookmark(book, skandhNum, ch, scopeLabel); }
+            const chKey = e.target.dataset.chkey;
+            const ch = chapters.find(c => c.key === chKey);
+            if(!ch) return;
+            if(chKey !== currentKey) refreshScrubForChapter(chKey);
+            setCurrentChapter(chKey);
+            const num = parseInt(e.target.dataset.vkey.split('-').pop(), 10);
+            const vIdx = ch.data.verses.findIndex(v => v.num === num);
+            if(!scrubDragging && vIdx >= 0) setScrub(vIdx, ch.data.verses.length);
+            saveScopeBookmark(book, skandhNum, ch, scopeLabel);
           }
         });
       }, { threshold: 0.6 });
@@ -170,6 +258,22 @@ function renderReader(app, book, skandhNum, startChapterKey){
   }
 
   window.__vvRenderReader = () => renderReader(app, book, skandhNum, currentKey);
+}
+
+function openChapterListSheet(chapters, currentKey, onPick){
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <button class="close-x">✕</button>
+      <h2>☰ अध्याय सूची / Chapters</h2>
+      ${chapters.map(c => `<button class="chlist-item ${c.key===currentKey?'current':''}" data-key="${c.key}">${c.label}</button>`).join('')}
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
+  overlay.querySelector('.close-x').onclick = () => overlay.remove();
+  overlay.querySelectorAll('[data-key]').forEach(b => b.onclick = () => { overlay.remove(); onPick(b.dataset.key); });
 }
 
 function saveScopeBookmark(book, skandhNum, chapter, scopeLabel){
