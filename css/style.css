@@ -214,24 +214,104 @@ img{ max-width:100%; }
 }
 .card-actions button:active{ color: var(--orange); }
 
-/* Horizontal paged ("book") mode */
-.verse-pager{
-  display:flex; overflow-x:auto; scroll-snap-type: x mandatory;
-  height: calc(100vh - 150px);
-  scrollbar-width:none;
+/* Tika cards — distinct teal/ocean-blue, shown below the main mula+anuvad card */
+:root{ --teal: #0e7c8a; --teal-bg: #e6f4f6; --teal-border: #bfe3e8; }
+[data-theme="dark"]{ --teal: #4fc3d1; --teal-bg: #12292d; --teal-border: #1d3d42; }
+[data-theme="sepia"]{ --teal-bg: #e3eeea; --teal-border: #c3d9d3; }
+.tika-card{
+  background: var(--teal-bg); border: 1px solid var(--teal-border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.1rem 1.1rem 1rem; margin: -.4rem 0 1rem;
 }
-.verse-pager::-webkit-scrollbar{ display:none; }
-.verse-pager .page{
-  flex: 0 0 100%; scroll-snap-align:center;
-  display:flex; align-items:center; justify-content:center;
-  padding: 1rem 1.2rem;
+.tika-card .tika-title{
+  font-size:.78rem; font-weight:700; color: var(--teal); margin-bottom:.6rem;
+  display:flex; align-items:center; gap:.4rem;
 }
-.verse-pager .page .verse-card{ width:100%; max-width:520px; max-height:100%; overflow:auto; }
-.page-dots{
-  display:flex; justify-content:center; gap:5px; padding:.5rem 0 1rem; flex-wrap:wrap;
+.tika-card .verse-block{ color: var(--ink); }
+.tika-card .card-actions{ border-top-color: var(--teal-border); }
+
+/* Flow content — continuous reading, no card boxes. Shared by vertical flow
+   mode (.flow-feed, tall scrolling column) and book mode (.book-flow, paginated). */
+.flow-feed{ padding: 1rem 1.3rem 3rem; max-width: 640px; margin: 0 auto; }
+.flow-p{
+  max-width: var(--line-ch); margin: 0 auto 1.1rem;
+  font-size: var(--font-size); line-height: var(--line-height);
+  font-family: var(--font-deva); color: var(--ink);
 }
-.page-dots span{ width:6px; height:6px; border-radius:50%; background: var(--sky-2); }
-.page-dots span.active{ background: var(--orange); width:16px; border-radius:4px; }
+.book-flow .flow-p{ margin-left: auto; margin-right: auto; }
+.flow-vnum{
+  font-size: .68rem; color: var(--orange); vertical-align: super; margin-right:.2rem;
+}
+.flow-speaker{ color: var(--ink-soft); font-size: calc(var(--font-size) * .9); }
+.flow-sa{ font-family: var(--font-deva); }
+.flow-hi{ font-family: var(--font-deva); }
+.flow-en{ font-family: var(--font-latin); color: var(--ink-soft); font-size: calc(var(--font-size) * .88); }
+.flow-tika{ display:block; margin-top:.5rem; padding-top:.5rem; border-top: 1px dashed var(--teal-border); color: var(--ink); }
+.flow-tika-label{ color: var(--teal); }
+.flow-feed .chapter-break, .book-flow .chapter-break{
+  margin-left:0; margin-right:0; text-align:center; font-size:1rem; font-weight:700; color: var(--orange);
+  padding: .6rem 0; border-bottom: none;
+}
+
+/* Content-mode tabs, shown inside the chapter-list (☰) sheet */
+.mode-tabs{ display:flex; flex-direction:column; gap:.5rem; }
+.mode-tab{
+  text-align:left; background: var(--card-bg); border:1px solid var(--card-border); border-radius:12px;
+  padding:.65rem .9rem; font-size:.88rem; color:var(--ink);
+}
+.mode-tab.active{ border-color: var(--orange); color: var(--orange); font-weight:700; }
+.mode-tab .m-sub{ display:block; font-size:.72rem; color:var(--ink-soft); font-weight:400; margin-top:.15rem; }
+.mode-tab.active .m-sub{ color: var(--orange); opacity:.8; }
+
+/* Horizontal paged ("book") mode — real CSS-reflowed pages, not 1 card per page.
+   column-width is set to exactly the wrapper's width via JS-friendly 100% column
+   trick: column-fill + explicit height makes the browser flow content into as many
+   same-width "pages" as the content needs, which we then step through by exactly
+   one clientWidth per page-turn. */
+.book-flow-wrap{
+  position: relative;
+  height: calc(100vh - 220px);
+}
+.book-flow{
+  height: 100%;
+  columns: 1;
+  column-width: 100%;
+  column-gap: 0;
+  column-fill: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding: 1.3rem 1.4rem;
+  box-sizing: border-box;
+}
+.book-flow::-webkit-scrollbar{ display:none; }
+.book-flow .chapter-break{
+  break-before: column; margin: 0 0 1rem;
+}
+.book-flow .flow-p:first-child .chapter-break{ break-before: avoid; }
+.book-tap-zone{
+  position:absolute; top:0; bottom:0; width:22%; z-index:5;
+}
+.book-tap-zone.left{ left:0; }
+.book-tap-zone.right{ right:0; }
+
+@media (min-width: 700px){
+  .book-flow-wrap{ height: calc(100vh - 240px); }
+}
+
+/* Tap-to-advance FAB — vertical scroll mode only. Shows current verse ref
+   (chapter.verse for Gita-like books, skandh.chapter.verse for Bhagavata),
+   tap to jump straight to the next verse instead of thumb-scrolling. */
+.next-verse-fab{
+  position: fixed; right: 16px; bottom: calc(78px + env(safe-area-inset-bottom));
+  z-index: 35; width: 54px; height: 54px; border-radius: 50%;
+  background: var(--orange); color:#fff; border:none; box-shadow: 0 3px 14px rgba(60,40,10,.28);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  line-height:1;
+}
+.next-verse-fab .nv-arrow{ font-size:1.15rem; }
+.next-verse-fab .nv-ref{ font-size:.62rem; font-weight:700; }
+.next-verse-fab:active{ transform: scale(.94); }
 
 /* ---------- Bottom position scrubber (Kotatsu-style) ---------- */
 .scrub-bar{
@@ -304,6 +384,16 @@ select{
   background: var(--card-bg); color: var(--ink); font-size:.9rem;
 }
 input[type=color]{ width:44px; height:34px; border:none; background:none; }
+
+.tika-list{ display:flex; flex-direction:column; gap:.4rem; }
+.tika-row{
+  display:flex; align-items:baseline; gap:.5rem; padding:.5rem .6rem;
+  background: var(--card-bg); border:1px solid var(--card-border); border-radius:10px; font-size:.88rem;
+}
+.tika-row.disabled{ opacity:.5; }
+.tika-row input[type=checkbox]{ accent-color: var(--teal); width:16px; height:16px; flex-shrink:0; }
+.tika-row .t-label{ font-family: var(--font-deva); }
+.tika-row .t-sub{ font-size:.72rem; color: var(--ink-soft); margin-left:auto; text-align:right; }
 
 /* ---------- Reformat tool ---------- */
 .reformat-wrap{ padding: 1rem 1.1rem 2rem; }

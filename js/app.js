@@ -11,19 +11,35 @@ const DEFAULT_SETTINGS = {
   lineHeight: 1.95,
   langs: { sa: true, hi: true, en: false },
   readingMode: 'vertical',   // vertical | horizontal  (used in skandh/book scope)
-  pageDividers: true
+  pageDividers: true,
+  contentMode: 'default',    // default | tika | flow
+  tikas: { amritaTarangini: false, tattvadipika: false }
 };
+
+const TIKA_DEFS = [
+  { key: 'amritaTarangini', label: 'अमृततरङ्गिणी', sub: 'श्रीपुरुषोत्तमकृता', available: true },
+  { key: 'tattvadipika', label: 'तत्त्वदीपिका', sub: 'श्रीवल्लभजीमहाराजकृता', available: true },
+  { key: 'atHindiVyakhya', label: 'अमृततरङ्गिणी हिन्दी व्याख्या', sub: 'जल्द आ रहा है', available: false },
+  { key: 'hindiVyakhya2', label: 'हिन्दी व्याख्या (2)', sub: 'जल्द आ रहा है', available: false },
+  { key: 'gujaratiVyakhya', label: 'गुर्जर-व्याख्या', sub: 'श्रीनानूलाल गांधीकृता · जल्द आ रहा है', available: false }
+];
 
 function loadSettings(){
   try{
     const raw = localStorage.getItem('vv_settings');
     if(!raw) return { ...DEFAULT_SETTINGS };
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw), langs: { ...DEFAULT_SETTINGS.langs, ...(JSON.parse(raw).langs||{}) } };
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_SETTINGS, ...parsed,
+      langs: { ...DEFAULT_SETTINGS.langs, ...(parsed.langs||{}) },
+      tikas: { ...DEFAULT_SETTINGS.tikas, ...(parsed.tikas||{}) }
+    };
   }catch(e){ return { ...DEFAULT_SETTINGS }; }
 }
 function saveSettings(s){ localStorage.setItem('vv_settings', JSON.stringify(s)); }
 
 let settings = loadSettings();
+window.settings = settings; // exposed for devtools/debugging (kept in sync — settings is mutated in place, never reassigned)
 
 function applySettingsToDOM(){
   const root = document.documentElement;
@@ -388,6 +404,18 @@ function openSettingsSheet(){
           <button class="chip ${settings.pageDividers?'active':''}" id="toggle-dividers">${settings.pageDividers?'चालू / On':'बंद / Off'}</button>
         </div>
       </div>
+
+      <div class="setting-row">
+        <label>टीकाएँ / Commentaries — इन्हें दिखाने के लिए "टीका मोड" चुनें (⋮ मेनू से)</label>
+        <div class="tika-list">
+          ${TIKA_DEFS.map(t => `
+            <label class="tika-row ${t.available?'':'disabled'}">
+              <input type="checkbox" data-tika="${t.key}" ${settings.tikas[t.key]?'checked':''} ${t.available?'':'disabled'}>
+              <span class="t-label">${t.label}</span>
+              <span class="t-sub">${t.sub}</span>
+            </label>`).join('')}
+        </div>
+      </div>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -406,6 +434,9 @@ function openSettingsSheet(){
   });
   const dv = overlay.querySelector('#toggle-dividers');
   if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); close(); openSettingsSheet(); };
+  overlay.querySelectorAll('[data-tika]').forEach(cb => cb.onchange = () => {
+    settings.tikas[cb.dataset.tika] = cb.checked; saveSettings(settings); refreshReaderIfOpen();
+  });
 }
 function refreshReaderIfOpen(){ if(window.__vvRenderReader) window.__vvRenderReader(); else render(); }
 
