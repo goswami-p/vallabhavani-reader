@@ -201,6 +201,7 @@ function render(){
   const parts = route();
   const app = document.getElementById('app');
   window.scrollTo(0,0);
+  window.__vvRenderReader = null;
 
   if(parts.length === 0) return renderHome(app);
   if(parts[0] === 'reformat') return renderReformat(app);
@@ -214,16 +215,16 @@ function render(){
     if(parts.length === 2) return renderBookView(app, book);
 
     // #/book/:id/read  -> whole-book continuous/paged reader
-    if(parts[2] === 'read') return renderReaderScope(app, book, null);
+    if(parts[2] === 'read') return renderReader(app, book, null, null);
 
     if(book.hasSkandh && parts[2] === 'skandh'){
       const sk = parseInt(parts[3],10);
       if(parts.length === 4) return renderSkandhView(app, book, sk);
-      if(parts[4] === 'read') return renderReaderScope(app, book, sk);
-      if(parts[4] === 'adhyay') return renderChapterView(app, book, sk, parseInt(parts[5],10));
+      if(parts[4] === 'read') return renderReader(app, book, sk, null);
+      if(parts[4] === 'adhyay') return renderReader(app, book, sk, `s${sk}a${parseInt(parts[5],10)}`);
     }
     if(!book.hasSkandh && parts[2] === 'adhyay'){
-      return renderChapterView(app, book, null, parseInt(parts[3],10));
+      return renderReader(app, book, null, `a${parseInt(parts[3],10)}`);
     }
   }
   renderHome(app);
@@ -335,7 +336,7 @@ function wireTopbar(app){
 }
 
 /* ---------------- Settings sheet ---------------- */
-function openSettingsSheet(forceVerticalOnly){
+function openSettingsSheet(){
   const overlay = document.createElement('div');
   overlay.className = 'sheet-overlay';
   overlay.innerHTML = `
@@ -381,15 +382,6 @@ function openSettingsSheet(forceVerticalOnly){
         </div>
       </div>
 
-      ${!forceVerticalOnly ? `
-      <div class="setting-row">
-        <label>पढ़ने का तरीका / Reading mode</label>
-        <div class="mode-toggle" id="mode-toggle">
-          <button data-mode="vertical" class="${settings.readingMode==='vertical'?'active':''}">⬇️ वर्टिकल</button>
-          <button data-mode="horizontal" class="${settings.readingMode==='horizontal'?'active':''}">➡️ हॉरिज़ॉन्टल</button>
-        </div>
-      </div>` : ''}
-
       <div class="setting-row">
         <label>पेज डिवाइडर / Page dividers (vertical mode)</label>
         <div class="opt-row">
@@ -401,23 +393,21 @@ function openSettingsSheet(forceVerticalOnly){
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if(e.target === overlay) close(); });
   overlay.querySelector('.close-x').onclick = close;
-  function close(){ overlay.remove(); render(); }
+  function close(){ overlay.remove(); refreshReaderIfOpen(); }
 
-  overlay.querySelectorAll('[data-theme]').forEach(b => b.onclick = () => { settings.theme = b.dataset.theme; saveSettings(settings); close(); openSettingsSheet(forceVerticalOnly); });
+  overlay.querySelectorAll('[data-theme]').forEach(b => b.onclick = () => { settings.theme = b.dataset.theme; saveSettings(settings); close(); openSettingsSheet(); });
   const cbg = overlay.querySelector('#custom-bg'); if(cbg) cbg.oninput = () => { settings.customBg = cbg.value; saveSettings(settings); applySettingsToDOM(); };
   const ctx = overlay.querySelector('#custom-text'); if(ctx) ctx.oninput = () => { settings.customText = ctx.value; saveSettings(settings); applySettingsToDOM(); };
   overlay.querySelector('#font-family').onchange = (e) => { settings.fontFamily = e.target.value; saveSettings(settings); applySettingsToDOM(); };
   overlay.querySelector('#font-size').oninput = (e) => { settings.fontSize = parseFloat(e.target.value); saveSettings(settings); applySettingsToDOM(); };
   overlay.querySelector('#line-ch').oninput = (e) => { settings.lineCh = parseInt(e.target.value,10); saveSettings(settings); applySettingsToDOM(); };
   overlay.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => {
-    const l = b.dataset.lang; settings.langs[l] = !settings.langs[l]; saveSettings(settings); close(); openSettingsSheet(forceVerticalOnly);
+    const l = b.dataset.lang; settings.langs[l] = !settings.langs[l]; saveSettings(settings); close(); openSettingsSheet();
   });
-  const mt = overlay.querySelector('#mode-toggle');
-  if(mt) mt.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { settings.readingMode = b.dataset.mode; saveSettings(settings); close(); openSettingsSheet(forceVerticalOnly); refreshReaderIfOpen(); });
   const dv = overlay.querySelector('#toggle-dividers');
-  if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); close(); openSettingsSheet(forceVerticalOnly); refreshReaderIfOpen(); };
+  if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); close(); openSettingsSheet(); };
 }
-function refreshReaderIfOpen(){ if(window.__vvRenderReader) window.__vvRenderReader(); }
+function refreshReaderIfOpen(){ if(window.__vvRenderReader) window.__vvRenderReader(); else render(); }
 
 /* ---------------- Reformat tool ---------------- */
 function renderReformat(app){
