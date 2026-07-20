@@ -157,12 +157,15 @@ img{ max-width:100%; }
 
 /* ---------- Reader ---------- */
 .reader-toolbar{
-  position: sticky; top: 57px; z-index: 39;
+  position: fixed; top: 57px; left:0; right:0; z-index: 39;
   display:flex; gap:.4rem; padding:.4rem 1rem; overflow-x:auto;
   align-items:center;
   background: linear-gradient(180deg, var(--sky) 85%, transparent);
   backdrop-filter: blur(6px);
+  transform: translateY(-120%);
+  transition: transform .2s ease;
 }
+.reader-toolbar.show{ transform: translateY(0); }
 .mode-toggle{
   display:inline-flex; background: var(--sky-2); border-radius: 20px; padding:2px;
 }

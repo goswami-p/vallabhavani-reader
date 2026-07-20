@@ -191,6 +191,9 @@ function renderReader(app, book, skandhNum, startChapterKey){
     renderReader(app, book, skandhNum, currentKey); // keep reading position across mode switch
   });
 
+  const toolbarEl = app.querySelector('.reader-toolbar');
+  if(toolbarEl) toolbarEl.classList.add('show');
+
   const root = document.getElementById('reader-root');
 
   if(!chapters.length){
@@ -393,6 +396,28 @@ function renderReader(app, book, skandhNum, startChapterKey){
   refreshScrubForChapter(currentKey);
   setScrub(0, chapters.find(c=>c.key===currentKey).data.verses.length);
   jumpTo(currentKey, 0, 'auto'); // ensure initial scroll/page position lands exactly on startKey (needed for book mode's layout-dependent offsets)
+
+  /* ---- Mode-toggle bar auto-hides while scrolling down, reappears on
+     scroll-up so it's reachable without hogging screen space permanently.
+     Armed on a short delay so that landing deep in the book (e.g. opening
+     chapter 5 directly, which itself fires a couple of settling scroll
+     events as the initial jumpTo above lands) isn't mistaken for a
+     scroll-down gesture that immediately hides the bar. ---- */
+  if(window.__vvToolbarScrollHandler) window.removeEventListener('scroll', window.__vvToolbarScrollHandler);
+  if(toolbarEl){
+    let lastY = window.scrollY;
+    const onToolbarScroll = () => {
+      const y = window.scrollY;
+      if(y < 40 || y < lastY - 4) toolbarEl.classList.add('show');
+      else if(y > lastY + 4) toolbarEl.classList.remove('show');
+      lastY = y;
+    };
+    window.__vvToolbarScrollHandler = onToolbarScroll;
+    setTimeout(() => {
+      lastY = window.scrollY;
+      window.addEventListener('scroll', onToolbarScroll, { passive: true });
+    }, 300);
+  }
   if(nvRef){
     const firstV = chapters.find(c=>c.key===currentKey).data.verses[0];
     if(firstV) nvRef.textContent = verseRefLabel(book, currentKey, firstV.num);
@@ -451,6 +476,17 @@ function renderReader(app, book, skandhNum, startChapterKey){
       window.removeEventListener('mouseup', endDrag);
     }
     function startDrag(e){
+      if(e.touches){
+        // Only grab the touch if it actually starts near the visible thumb —
+        // the track spans almost the full screen height, so without this a
+        // normal vertical swipe anywhere near the right edge (very common
+        // with one-handed phone use) gets hijacked into a chapter-local
+        // scrub instead of scrolling the page into the next chapter.
+        const thumbRect = vscrollThumb.getBoundingClientRect();
+        const grabPad = 24;
+        const clientY = e.touches[0].clientY;
+        if(clientY < thumbRect.top - grabPad || clientY > thumbRect.bottom + grabPad) return;
+      }
       vDragging = true; scrubDragging = true;
       vscrollThumb.classList.add('dragging'); vscrollLabel.classList.add('show');
       window.addEventListener('mousemove', onMove);
