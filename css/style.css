@@ -23,7 +23,7 @@
   --line-height: 1.95;
 
   --radius: 16px;
-  --page-shadow: 0 14px 22px -12px rgba(20,15,10,.35), 0 2px 6px rgba(20,15,10,.08);
+  --page-shadow: 0 10px 14px -12px rgba(20,15,10,.45);
 }
 
 /* Theme: sepia (Pocketbook style) */
@@ -32,7 +32,7 @@
   --ink: #4a3826; --ink-soft: #6b5842;
   --card-bg: #faf3e3; --card-border: #e6d6b8;
   --shadow: 0 2px 10px rgba(80,60,20,0.08);
-  --page-shadow: 0 14px 22px -12px rgba(60,45,15,.4), 0 2px 6px rgba(60,45,15,.1);
+  --page-shadow: 0 10px 14px -12px rgba(60,45,15,.5);
 }
 
 /* Theme: dark */
@@ -41,7 +41,7 @@
   --ink: #eae6df; --ink-soft: #b9b2a6;
   --card-bg: #1d2228; --card-border: #2b323b;
   --shadow: 0 2px 14px rgba(0,0,0,0.35);
-  --page-shadow: 0 14px 24px -10px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.3);
+  --page-shadow: 0 10px 14px -12px rgba(0,0,0,.65);
   --orange: #f0a15c; --orange-2: #f4b578;
 }
 
@@ -174,10 +174,15 @@ img{ max-width:100%; }
 }
 .mode-toggle button.active{ background: var(--orange); color:#fff; }
 
-/* Vertical Scrolling switch — only shown in paginated mode (PocketBook-style) */
-.vswitch{
+/* Vertical Scrolling / Page Dividers switches (PocketBook-style).
+   ".setting-row label" (display:block) outranks a bare ".vswitch" on
+   specificity since .vswitch IS a <label> inside a .setting-row — without
+   the more specific selector here the switch collapses to block layout
+   and visually overlaps its own label text. */
+.switch-row{ display:flex; flex-wrap:wrap; gap:.9rem 1.6rem; }
+.setting-row label.vswitch{
   display:flex; align-items:center; gap:.5rem;
-  font-size:.85rem; color: var(--ink);
+  font-size:.85rem; color: var(--ink); margin-bottom:0;
 }
 .vswitch input{ position:absolute; opacity:0; width:0; height:0; }
 .vswitch-track{
@@ -299,17 +304,20 @@ img{ max-width:100%; }
   padding: .6rem 0; border-bottom: none;
 }
 
-/* Paginated + vertical scrolling ON: pages stacked in one scrollable column.
-   Each page is its own shadowed card (PocketBook-style — the shadow reads as
-   the page's physical edge) with a visible gap before the next one begins.
-   Deliberately NOT a dashed rule — that's already used for chapter breaks
-   (inside a page, scroll mode) and would be impossible to tell apart from a
-   page boundary; a page boundary needs its own distinct visual language. */
-.page-stack{ display:flex; flex-direction:column; gap: 18px; padding: 10px 8px 28px; }
-.page-slot{
-  min-height: var(--page-min-h, 70vh);
-  background: var(--card-bg);
-  border-radius: var(--radius);
+/* Paginated + vertical scrolling ON: pages stacked in one scrollable column,
+   reading surface flows continuously (same background as the rest of the
+   app — NOT a boxed/rounded card, that read as just another verse-card).
+   A page boundary is marked only by a gap + a shadow line falling off the
+   previous page's bottom edge, echoing a real stack of paper pages —
+   deliberately NOT a dashed rule, since that's already `.chapter-break`'s
+   look (a boundary *inside* one page, scroll mode) and would be impossible
+   to tell apart from an actual page boundary. */
+.page-stack{ display:flex; flex-direction:column; }
+.page-slot{ min-height: var(--page-min-h, 70vh); }
+.page-slot:not(:last-child){
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid var(--card-border);
   box-shadow: var(--page-shadow);
 }
 

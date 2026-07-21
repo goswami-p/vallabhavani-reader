@@ -137,7 +137,17 @@ function buildFlowHtml(chapters){
    end do they get a page turn. This mirrors how a real PDF/EPUB reflow
    engine keeps page breaks tied to content, not to whatever happens to
    fit on screen at the moment. */
-const PAGINATION_REF = { fontSize: 1.15, lineHeight: 1.95, lineCh: 30 };
+const PAGINATION_REF = {
+  fontSize: 1.15, lineHeight: 1.95, lineCh: 30,
+  // Fixed, device-independent page height — NOT window.innerHeight. A page
+  // boundary must not depend on how tall this particular phone's screen is;
+  // it should be the same whether read on a small or large device, the way
+  // a real book/PDF page's boundary doesn't move when you switch devices.
+  // Deliberately bigger than one typical phone screen so a page reads as a
+  // real chunk of the book, not "whatever fits the display right now" —
+  // reaching a page's actual end should usually take a bit of scrolling.
+  pageHeight: 1600
+};
 
 function buildPageBlocks(chapters){
   const blocks = [];
@@ -289,10 +299,14 @@ function renderReader(app, book, skandhNum, startChapterKey){
 
   if(settings.readingMode === 'paginated'){
     const blocks = buildPageBlocks(chapters);
+    // Boundary computation uses the fixed PAGINATION_REF.pageHeight (never
+    // the live viewport) — see its comment. viewportH below is only the
+    // visible *display window* size (how much of a page shows at once
+    // before you scroll/swipe), a separate, purely-UI concern.
     const topbarH = (document.querySelector('.topbar') || {}).offsetHeight || 57;
     const scrubH = (document.getElementById('scrubBar') || {}).offsetHeight || 64;
-    const pageH = Math.max(200, window.innerHeight - topbarH - scrubH - 16);
-    const pages = computePages(blocks, content.clientWidth, pageH);
+    const viewportH = Math.max(200, window.innerHeight - topbarH - scrubH - 16);
+    const pages = computePages(blocks, content.clientWidth, PAGINATION_REF.pageHeight);
     pager = { blocks, pages };
 
     function pageIndexForVerse(chKey, vnum){
@@ -318,7 +332,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
          occupies a full slot (visible boundary) — scrolling past its
          bottom carries you straight into the next page's top, PocketBook
          "Vertical Scrolling ON" style. ---- */
-      content.innerHTML = `<div class="page-stack" id="pageStack" style="--page-min-h:${pageH}px">${
+      content.innerHTML = `<div class="page-stack" id="pageStack" style="--page-min-h:${viewportH}px">${
         pages.map((p, pi) => `<div class="page-slot" data-page="${pi}"><div class="page-content">${pageHtml(pi)}</div></div>`).join('')
       }</div>`;
       const stack = document.getElementById('pageStack');
@@ -351,7 +365,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
          rounding drift between a measured width and the rendered layout
          to land the viewport between two pages. ---- */
       content.innerHTML = `
-        <div class="page-single-wrap" id="pageSingleWrap" style="height:${pageH}px">
+        <div class="page-single-wrap" id="pageSingleWrap" style="height:${viewportH}px">
           <div class="page-single" id="pageSingle"></div>
           <div class="book-tap-zone left" id="tapPrev"></div>
           <div class="book-tap-zone right" id="tapNext"></div>
@@ -638,14 +652,19 @@ function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick,
             <button data-mode="paginated" class="${settings.readingMode==='paginated'?'active':''}">${ICON_PAGES} पेज</button>
           </div>
         </div>
-        ${settings.readingMode === 'paginated' ? `
-        <div class="setting-row">
+        <div class="setting-row switch-row">
+          ${settings.readingMode === 'paginated' ? `
           <label class="vswitch" id="vertScrollSwitch">
             <input type="checkbox" id="vertScrollToggle" ${settings.paginatedVertical ? 'checked' : ''}>
             <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
-            <span class="vswitch-label">वर्टिकल स्क्रॉलिंग / Vertical Scrolling</span>
+            <span class="vswitch-label">वर्टिकल स्क्रॉलिंग</span>
+          </label>` : ''}
+          <label class="vswitch" id="pageDividerSwitch">
+            <input type="checkbox" id="pageDividerToggle" ${settings.pageDividers ? 'checked' : ''}>
+            <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
+            <span class="vswitch-label">पेज डिवाइडर</span>
           </label>
-        </div>` : ''}
+        </div>
         <div class="setting-row">
           <label>कंटेंट मोड / Content mode</label>
           <div class="mode-tabs">
@@ -667,12 +686,6 @@ function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick,
           <label>भाषाएँ / Languages</label>
           <div class="opt-row">
             ${['sa','hi','en'].map(l => `<button class="chip ${settings.langs[l]?'active':''}" data-lang="${l}">${({sa:'संस्कृत',hi:'हिन्दी',en:'English'})[l]}</button>`).join('')}
-          </div>
-        </div>
-        <div class="setting-row">
-          <label>पेज डिवाइडर / Page dividers (scroll mode)</label>
-          <div class="opt-row">
-            <button class="chip ${settings.pageDividers?'active':''}" id="toggle-dividers">${settings.pageDividers?'चालू / On':'बंद / Off'}</button>
           </div>
         </div>
       </div>
@@ -713,8 +726,8 @@ function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick,
   overlay.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => {
     settings.langs[b.dataset.lang] = !settings.langs[b.dataset.lang]; saveSettings(settings); overlay.remove(); reRender();
   });
-  const dv = overlay.querySelector('#toggle-dividers');
-  if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); overlay.remove(); reRender(); };
+  const dv = overlay.querySelector('#pageDividerToggle');
+  if(dv) dv.onchange = () => { settings.pageDividers = dv.checked; saveSettings(settings); overlay.remove(); reRender(); };
 
   // Theme changes need the sheet HTML rebuilt (swatch highlight, custom-color
   // pickers) — reopen on the Settings tab specifically, not back to Contents.
