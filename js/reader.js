@@ -30,6 +30,7 @@ function verseCardHtml(v, meta){
   if(langs.hi && v.hi) blocks.push(`<div class="verse-block lang-hi"><p>${v.hi.replace(/\n/g,'<br>')}</p></div>`);
   if(langs.en && v.en) blocks.push(`<div class="verse-block lang-en"><p>${v.en.replace(/\n/g,'<br>')}</p></div>`);
 
+  const isAdmin = window.vvIsAdmin && vvIsAdmin();
   let html = `
     <div class="verse-card" data-vkey="${meta.chapterKey}-${v.num}" data-chkey="${meta.chapterKey}">
       <div class="v-num">${meta.chapterLabel ? meta.chapterLabel + ' · ' : ''}श्लोक ${v.num}</div>
@@ -37,6 +38,7 @@ function verseCardHtml(v, meta){
       <div class="card-actions">
         <button data-copy-v="${meta.chapterKey}-${v.num}" title="Copy">${ICON_COPY}</button>
         <button data-share-v="${meta.chapterKey}-${v.num}" title="Share">${ICON_SHARE}</button>
+        ${isAdmin ? `<button class="edit-btn" data-edit-v="${meta.chapterKey}-${v.num}" data-book-id="${meta.bookId||''}" title="Edit">${ICON_EDIT}</button>` : ''}
       </div>
     </div>`;
 
@@ -81,6 +83,83 @@ function wireVerseCardActions(app, verseIndex){
       if(v && t && v.tikas && v.tikas[tKey]) shareText(`${t.label} — श्लोक ${vnum}\n\n${v.tikas[tKey]}`, t.label);
     };
   });
+  app.querySelectorAll('[data-edit-v]').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.editV;
+      const idx = key.lastIndexOf('-');
+      const chKey = key.slice(0, idx), vnum = key.slice(idx + 1);
+      const v = verseIndex[key];
+      if(v) openVerseEditSheet(v, { chapterKey: chKey, verseNum: vnum, bookId: btn.dataset.bookId });
+    };
+  });
+}
+
+/* ---------------- Admin verse-edit sheet ---------------- */
+function openVerseEditSheet(v, meta){
+  const editableTikas = TIKA_DEFS.filter(t => t.available);
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay';
+  overlay.innerHTML = `
+    <div class="sheet verse-edit-sheet">
+      <button class="close-x">${ICON_CLOSE}</button>
+      <h2>${ICON_EDIT} श्लोक ${meta.verseNum} — एडिट करें</h2>
+
+      <label>संस्कृत (मूल)</label>
+      <textarea id="edit-sa">${escapeHtml(v.sa || '')}</textarea>
+
+      <label>हिन्दी अनुवाद</label>
+      <textarea id="edit-hi">${escapeHtml(v.hi || '')}</textarea>
+
+      <label>English</label>
+      <textarea id="edit-en">${escapeHtml(v.en || '')}</textarea>
+
+      ${editableTikas.map(t => `
+        <label>${t.label} <span style="font-weight:400">(${t.sub})</span></label>
+        <textarea id="edit-tika-${t.key}">${escapeHtml((v.tikas && v.tikas[t.key]) || '')}</textarea>
+      `).join('')}
+
+      <div class="edit-actions">
+        <button class="cancel-btn" id="edit-cancel">रद्द करें</button>
+        <button class="save-btn" id="edit-save">सेव करें</button>
+      </div>
+      <div class="edit-status" id="edit-status"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
+  overlay.querySelector('.close-x').onclick = () => overlay.remove();
+  overlay.querySelector('#edit-cancel').onclick = () => overlay.remove();
+
+  overlay.querySelector('#edit-save').onclick = () => {
+    const saveBtn = overlay.querySelector('#edit-save');
+    const statusEl = overlay.querySelector('#edit-status');
+    saveBtn.disabled = true; saveBtn.textContent = 'सेव हो रहा है…';
+
+    const newSa = overlay.querySelector('#edit-sa').value;
+    const newHi = overlay.querySelector('#edit-hi').value;
+    const newEn = overlay.querySelector('#edit-en').value;
+    const newTikas = {};
+    editableTikas.forEach(t => { newTikas[t.key] = overlay.querySelector(`#edit-tika-${t.key}`).value; });
+
+    const fields = { sa: newSa, hi: newHi, en: newEn, tikas: newTikas };
+    vvSaveVerseEdit(meta.bookId, meta.chapterKey, meta.verseNum, fields, (err) => {
+      if(err){
+        saveBtn.disabled = false; saveBtn.textContent = 'सेव करें';
+        statusEl.textContent = 'त्रुटि / Error: ' + err;
+        return;
+      }
+      // Update the in-memory verse straight away so it shows correctly
+      // without waiting on a fresh Firestore fetch.
+      v.sa = newSa; v.hi = newHi; v.en = newEn;
+      if(!v.tikas) v.tikas = {};
+      Object.keys(newTikas).forEach(k => { v.tikas[k] = newTikas[k]; });
+      statusEl.textContent = 'सेव हो गया ✓';
+      setTimeout(() => { overlay.remove(); if(window.__vvRenderReader) window.__vvRenderReader(); }, 500);
+    });
+  };
+}
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function parseTikaKey(s){
   // chapterKey itself may contain hyphens/letters+digits (e.g. "s1a2" or "a1") — tika key and vnum are always the last two segments
@@ -446,7 +525,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
     let html = '';
     chapters.forEach(ch => {
       html += `<div class="chapter-break" data-chkey="${ch.key}">${ch.label}</div>`;
-      ch.data.verses.forEach(v => { html += verseCardHtml(v, { chapterKey: ch.key, chapterLabel: '' }); });
+      ch.data.verses.forEach(v => { html += verseCardHtml(v, { chapterKey: ch.key, chapterLabel: '', bookId: book.id }); });
     });
     feed.innerHTML = html;
     jumpTo = (chKey, verseIdx, behavior) => {

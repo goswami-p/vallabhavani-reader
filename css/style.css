@@ -479,6 +479,33 @@ input[type=color]{ width:44px; height:34px; border:none; background:none; }
 .tika-row .t-label{ font-family: var(--font-deva); }
 .tika-row .t-sub{ font-size:.72rem; color: var(--ink-soft); margin-left:auto; text-align:right; }
 
+/* ---------- Admin login (Settings tab) ---------- */
+.admin-row{ padding-top:.6rem; border-top:1px dashed var(--card-border); }
+.admin-hint{ font-size:.78rem; color: var(--ink-soft); margin:.2rem 0 .5rem; }
+.admin-login-box{ display:flex; flex-direction:column; gap:.5rem; max-width:260px; }
+.admin-login-box input{
+  padding:.55rem .7rem; border-radius:10px; border:1px solid var(--card-border);
+  background: var(--card-bg); color: var(--ink); font-size:.9rem;
+}
+.admin-error{ font-size:.78rem; color:#c0392b; margin-top:.4rem; }
+
+/* ---------- Verse edit sheet (admin only) ---------- */
+.verse-edit-sheet label{ display:block; font-size:.8rem; color: var(--ink-soft); margin:.9rem 0 .35rem; }
+.verse-edit-sheet label:first-of-type{ margin-top:0; }
+.verse-edit-sheet textarea{
+  width:100%; min-height:90px; padding:.7rem; border-radius:12px;
+  border:1px solid var(--card-border); background: var(--card-bg); color:var(--ink);
+  font-family: var(--font-deva); font-size:.92rem; resize:vertical;
+}
+.verse-edit-sheet .edit-actions{ display:flex; gap:.6rem; margin-top:1.2rem; }
+.verse-edit-sheet .edit-actions button{
+  flex:1; padding:.7rem; border-radius:12px; border:none; font-size:.92rem; font-weight:600;
+}
+.verse-edit-sheet .save-btn{ background: var(--orange); color:#fff; }
+.verse-edit-sheet .cancel-btn{ background: var(--card-bg); color: var(--ink-soft); border:1px solid var(--card-border) !important; }
+.verse-edit-sheet .edit-status{ font-size:.8rem; color: var(--ink-soft); margin-top:.6rem; text-align:center; }
+.card-actions button.edit-btn{ color: var(--orange); margin-left:auto; }
+
 /* ---------- Reformat tool ---------- */
 .reformat-wrap{ padding: 1rem 1.1rem 2rem; }
 .reformat-wrap textarea{

@@ -1,0 +1,13 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Verse-content overrides written by the admin edit button.
+    // Anyone can read (so every visitor sees the corrected text);
+    // only a signed-in admin (see js/admin.js) can write.
+    match /overrides/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}

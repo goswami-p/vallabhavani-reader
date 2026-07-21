@@ -48,6 +48,8 @@ const ICON_PREV_TRACK = `<svg class="icon" viewBox="0 0 20 20" width="16" height
 const ICON_NEXT_TRACK = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" stroke="none"><rect x="15.4" y="4" width="1.6" height="12"/><path d="M4 4.5v11l9-5.5z"/></svg>`;
 const ICON_WAND = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16L14.5 5.5"/><path d="M12.5 4v2M17 6.5h-2M17.5 3.5l-1.2 1.2"/><path d="M6 14l1 1"/></svg>`;
 const ICON_BOOK_READ = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.3C8.4 4.1 6.1 3.6 3.2 3.8v11.4c2.9-.2 5.2.3 6.8 1.5"/><path d="M10 5.3c1.6-1.2 3.9-1.7 6.8-1.5v11.4c-2.9-.2-5.2.3-6.8 1.5"/><line x1="10" y1="5.3" x2="10" y2="16.7"/></svg>`;
+const ICON_LOCK = `<svg class="icon" viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="9" width="11" height="8" rx="1.6"/><path d="M6.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></svg>`;
+const ICON_EDIT = `<svg class="icon" viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12.9 3.6l3.5 3.5-9.6 9.6-4 .5.5-4z"/><path d="M11 5.5l3.5 3.5"/></svg>`;
 
 function loadSettings(){
   try{
@@ -233,7 +235,13 @@ function buildScope(bookId, skandhNum /* optional */){
 function navigate(hash){ location.hash = hash; }
 
 window.addEventListener('hashchange', render);
-window.addEventListener('DOMContentLoaded', () => { applySettingsToDOM(); render(); });
+window.addEventListener('DOMContentLoaded', () => {
+  applySettingsToDOM(); render();
+  // Cloud-saved admin edits load in the background and re-render in place
+  // once they arrive — the static data.js content shows instantly either way.
+  if(window.vvLoadOverrides) vvLoadOverrides((err, count) => { if(!err && count) refreshReaderIfOpen(); });
+  window.vvOnAdminStateChange = () => refreshReaderIfOpen();
+});
 
 function route(){
   const h = location.hash.replace(/^#\/?/, '');
@@ -417,9 +425,62 @@ function appearanceControlsHtml(){
       <label>${ICON_SPACING} स्पेसिंग / Spacing (line height)</label>
       <input type="range" id="line-height" min="1.3" max="2.6" step="0.05" value="${settings.lineHeight}">
     </div>
+    ${adminLoginHtml()}
   `;
 }
+
+/* ---------------- Admin login (Settings tab only, sirf gpoorna ke liye) ---------------- */
+function adminLoginHtml(){
+  if(!window.vvIsAdmin || !vvAdminReadyYet()){
+    return `<div class="setting-row admin-row"><label>${ICON_LOCK} एडमिन</label><p class="admin-hint">लोड हो रहा है…</p></div>`;
+  }
+  if(vvIsAdmin()){
+    return `
+      <div class="setting-row admin-row">
+        <label>${ICON_LOCK} एडमिन मोड चालू है / Admin mode ON</label>
+        <p class="admin-hint">अब हर श्लोक के पास ${ICON_EDIT} एडिट बटन दिखेगा — जो भी बदलोगे वह सबको दिखेगा।</p>
+        <div class="opt-row">
+          <button class="chip" id="admin-logout-btn">लॉगआउट / Logout</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="setting-row admin-row">
+      <label>${ICON_LOCK} एडमिन लॉगिन / Admin login</label>
+      <div class="admin-login-box">
+        <input type="text" id="admin-username" placeholder="Username" autocomplete="username">
+        <input type="password" id="admin-password" placeholder="Password" autocomplete="current-password">
+        <button class="chip" id="admin-login-btn">लॉगिन</button>
+      </div>
+      <p class="admin-error" id="admin-error" hidden></p>
+    </div>`;
+}
+function wireAdminLogin(container, onChange){
+  const loginBtn = container.querySelector('#admin-login-btn');
+  if(loginBtn){
+    const doLogin = () => {
+      const u = container.querySelector('#admin-username').value;
+      const p = container.querySelector('#admin-password').value;
+      loginBtn.disabled = true; loginBtn.textContent = '...';
+      vvAdminLogin(u, p, (err) => {
+        const errEl = container.querySelector('#admin-error');
+        if(err){
+          loginBtn.disabled = false; loginBtn.textContent = 'लॉगिन';
+          errEl.textContent = err; errEl.hidden = false;
+        } else {
+          onChange(); // will re-render this panel via vvOnAdminStateChange too, but do it right away for snappiness
+        }
+      });
+    };
+    loginBtn.onclick = doLogin;
+    container.querySelector('#admin-password').addEventListener('keydown', (e) => { if(e.key === 'Enter') doLogin(); });
+  }
+  const logoutBtn = container.querySelector('#admin-logout-btn');
+  if(logoutBtn) logoutBtn.onclick = () => { vvAdminLogout(); onChange(); };
+}
+
 function wireAppearanceControls(container, onRebuildNeeded){
+  wireAdminLogin(container, onRebuildNeeded);
   container.querySelectorAll('[data-theme]').forEach(b => b.onclick = () => { settings.theme = b.dataset.theme; saveSettings(settings); onRebuildNeeded(); });
   const cbg = container.querySelector('#custom-bg'); if(cbg) cbg.oninput = () => { settings.customBg = cbg.value; saveSettings(settings); applySettingsToDOM(); };
   const ctx = container.querySelector('#custom-text'); if(ctx) ctx.oninput = () => { settings.customText = ctx.value; saveSettings(settings); applySettingsToDOM(); };
