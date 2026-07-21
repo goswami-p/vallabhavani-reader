@@ -10,7 +10,8 @@ const DEFAULT_SETTINGS = {
   lineCh: 30,                // ch units -> controls words-per-line
   lineHeight: 1.95,
   langs: { sa: true, hi: true, en: false },
-  readingMode: 'vertical',   // vertical | horizontal  (used in skandh/book scope)
+  readingMode: 'scroll',     // scroll (infinite) | paginated (fixed page boundaries)
+  paginatedVertical: false,  // paginated mode only: false = swipe left/right, true = scroll down through page boundaries
   pageDividers: true,
   contentMode: 'default',    // default | tika | flow
   tikas: { amritaTarangini: false, tattvadipika: false }
@@ -24,11 +25,34 @@ const TIKA_DEFS = [
   { key: 'gujaratiVyakhya', label: 'गुर्जर-व्याख्या', sub: 'श्रीनानूलाल गांधीकृता · जल्द आ रहा है', available: false }
 ];
 
+/* ---------------- Icons (inline SVG, stroke=currentColor — no emoji) ---------------- */
+const ICON_SCROLL = `<svg class="icon" viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="4.5" x2="17" y2="4.5"/><line x1="3" y1="9" x2="17" y2="9"/><line x1="3" y1="13.5" x2="12" y2="13.5"/><path d="M14.5 12.5l2.2 2.2 2.2-2.2"/></svg>`;
+const ICON_PAGES = `<svg class="icon" viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6C8.4 4.7 6.1 4.2 3.2 4.4v11c2.9-.2 5.2.3 6.8 1.6"/><path d="M10 6c1.6-1.3 3.9-1.8 6.8-1.6v11c-2.9-.2-5.2.3-6.8 1.6"/><line x1="10" y1="6" x2="10" y2="17"/></svg>`;
+const ICON_CHEVRON_LEFT = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4.5l-6 5.5 6 5.5"/></svg>`;
+const ICON_CHEVRON_RIGHT = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4.5l6 5.5-6 5.5"/></svg>`;
+const ICON_TIKA = `<svg class="icon" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.5" width="14" height="10" rx="2"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="11" y2="10"/><path d="M7 13.5l-1.6 3 3-1.8"/></svg>`;
+const ICON_FLOW = `<svg class="icon" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 7c1.5-2 3-2 4.5 0s3 2 4.5 0 3-2 4.5 0 3 2 4.5 0"/><path d="M2 13c1.5-2 3-2 4.5 0s3 2 4.5 0 3-2 4.5 0 3 2 4.5 0"/></svg>`;
+const ICON_SETTINGS = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="2.6"/><path d="M10 3v1.6M10 15.4V17M17 10h-1.6M4.6 10H3M14.9 5.1l-1.13 1.13M6.23 13.67L5.1 14.9M14.9 14.9l-1.13-1.13M6.23 6.33L5.1 5.1"/></svg>`;
+const ICON_COPY = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4.5" width="9.5" height="11.5" rx="1.4"/><path d="M4 7v9a1.4 1.4 0 0 0 1.4 1.4H12"/></svg>`;
+const ICON_SHARE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v9"/><path d="M6.5 6.5L10 3l3.5 3.5"/><path d="M4 11.5V16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-4.5"/></svg>`;
+const ICON_BOOKMARK = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h9a1 1 0 0 1 1 1V17l-5.5-3.3L4.5 17V4.5a1 1 0 0 1 1-1z"/></svg>`;
+const ICON_CLOSE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="5" y1="5" x2="15" y2="15"/><line x1="15" y1="5" x2="5" y2="15"/></svg>`;
+const ICON_MENU = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="3" y1="5.5" x2="17" y2="5.5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="14.5" x2="17" y2="14.5"/></svg>`;
+const ICON_CHEVRON_DOWN = `<svg class="icon" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7.5l5.5 6 5.5-6"/></svg>`;
+const ICON_PREV_TRACK = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" stroke="none"><rect x="3" y="4" width="1.6" height="12"/><path d="M16 4.5v11L7 10z"/></svg>`;
+const ICON_NEXT_TRACK = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" stroke="none"><rect x="15.4" y="4" width="1.6" height="12"/><path d="M4 4.5v11l9-5.5z"/></svg>`;
+const ICON_WAND = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16L14.5 5.5"/><path d="M12.5 4v2M17 6.5h-2M17.5 3.5l-1.2 1.2"/><path d="M6 14l1 1"/></svg>`;
+const ICON_BOOK_READ = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.3C8.4 4.1 6.1 3.6 3.2 3.8v11.4c2.9-.2 5.2.3 6.8 1.5"/><path d="M10 5.3c1.6-1.2 3.9-1.7 6.8-1.5v11.4c-2.9-.2-5.2.3-6.8 1.5"/><line x1="10" y1="5.3" x2="10" y2="16.7"/></svg>`;
+
 function loadSettings(){
   try{
     const raw = localStorage.getItem('vv_settings');
     if(!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw);
+    // migrate old readingMode values (vertical/horizontal conflated "infinite scroll"
+    // with "swipe direction" — paginated mode can now be either direction itself)
+    if(parsed.readingMode === 'vertical') parsed.readingMode = 'scroll';
+    if(parsed.readingMode === 'horizontal') parsed.readingMode = 'paginated';
     return {
       ...DEFAULT_SETTINGS, ...parsed,
       langs: { ...DEFAULT_SETTINGS.langs, ...(parsed.langs||{}) },
@@ -251,8 +275,8 @@ function renderHome(app){
   const bookmarks = getBookmarks();
   app.innerHTML = `
     <div class="topbar"><h1>VallabhaVani</h1>
-      <button class="icon-btn" id="btn-reformat" title="Reformat text">🪄</button>
-      <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
+      <button class="icon-btn" id="btn-reformat" title="Reformat text">${ICON_WAND}</button>
+      <button class="icon-btn" id="btn-settings" title="Settings">${ICON_SETTINGS}</button>
     </div>
     <div class="hero">
       <div class="om">🕉️</div>
@@ -265,7 +289,7 @@ function renderHome(app){
         ${bookmarks.slice(0,5).map(b => `
           <div class="bookmark-row">
             <a href="${b.href}">${b.label}</a>
-            <button data-rm="${b.key}">✕</button>
+            <button data-rm="${b.key}">${ICON_CLOSE}</button>
           </div>`).join('')}
       </div>` : ''}
     <div class="section-title">पुस्तकें / Books</div>
@@ -278,7 +302,7 @@ function renderHome(app){
         </a>`).join('')}
     </div>
     <div class="foot-links">
-      <a href="#/reformat">🪄 रीड-मोड बदलें (Reformat)</a>
+      <a href="#/reformat">${ICON_WAND} रीड-मोड बदलें (Reformat)</a>
     </div>
   `;
   app.querySelector('#btn-settings').onclick = () => openSettingsSheet();
@@ -299,9 +323,9 @@ function renderBookView(app, book){
 
   app.innerHTML = `
     <div class="topbar">
-      <button class="back-btn" id="btn-back">←</button>
+      <button class="back-btn" id="btn-back">${ICON_CHEVRON_LEFT}</button>
       <h1>${book.title.hi}</h1>
-      <button class="icon-btn" id="btn-settings">⚙️</button>
+      <button class="icon-btn" id="btn-settings">${ICON_SETTINGS}</button>
     </div>
     <div class="grid-view">
       <div class="tile-grid">
@@ -311,7 +335,7 @@ function renderBookView(app, book){
             <span class="t">${it.sub}</span>
           </a>`).join('')}
       </div>
-      <button class="read-all-btn" id="btn-read-all">📖 पूरी पुस्तक पढ़ें / Read whole book</button>
+      <button class="read-all-btn" id="btn-read-all">${ICON_BOOK_READ} पूरी पुस्तक पढ़ें / Read whole book</button>
     </div>
   `;
   wireTopbar(app);
@@ -326,9 +350,9 @@ function renderSkandhView(app, book, skandhNum){
   });
   app.innerHTML = `
     <div class="topbar">
-      <button class="back-btn" id="btn-back">←</button>
+      <button class="back-btn" id="btn-back">${ICON_CHEVRON_LEFT}</button>
       <h1>${book.skandhTitles.hi[skandhNum-1]}</h1>
-      <button class="icon-btn" id="btn-settings">⚙️</button>
+      <button class="icon-btn" id="btn-settings">${ICON_SETTINGS}</button>
     </div>
     <div class="grid-view">
       <div class="tile-grid">
@@ -337,7 +361,7 @@ function renderSkandhView(app, book, skandhNum){
             <span class="n">${it.n}</span><span class="t">${it.sub}</span>
           </a>`).join('')}
       </div>
-      <button class="read-all-btn" id="btn-read-all">📖 पूरा स्कन्ध पढ़ें / Read whole skandh</button>
+      <button class="read-all-btn" id="btn-read-all">${ICON_BOOK_READ} पूरा स्कन्ध पढ़ें / Read whole skandh</button>
     </div>
   `;
   wireTopbar(app);
@@ -357,8 +381,8 @@ function openSettingsSheet(){
   overlay.className = 'sheet-overlay';
   overlay.innerHTML = `
     <div class="sheet">
-      <button class="close-x">✕</button>
-      <h2>⚙️ रीडिंग सेटिंग्स</h2>
+      <button class="close-x">${ICON_CLOSE}</button>
+      <h2>${ICON_SETTINGS} रीडिंग सेटिंग्स</h2>
 
       <div class="setting-row">
         <label>थीम / Theme</label>
@@ -448,9 +472,9 @@ function refreshReaderIfOpen(){ if(window.__vvRenderReader) window.__vvRenderRea
 function renderReformat(app){
   app.innerHTML = `
     <div class="topbar">
-      <button class="back-btn" id="btn-back">←</button>
-      <h1>🪄 आसान पढ़ने का रूप</h1>
-      <button class="icon-btn" id="btn-settings">⚙️</button>
+      <button class="back-btn" id="btn-back">${ICON_CHEVRON_LEFT}</button>
+      <h1>${ICON_WAND} आसान पढ़ने का रूप</h1>
+      <button class="icon-btn" id="btn-settings">${ICON_SETTINGS}</button>
     </div>
     <div class="reformat-wrap">
       <label style="font-size:.85rem;color:var(--ink-soft)">वेब लिंक (वैकल्पिक) / Paste a link (optional)</label>
@@ -489,7 +513,7 @@ function renderReformat(app){
             <div class="verse-block lang-hi"><p>${escapeHtml(p)}</p></div>
           </div>`).join('')}
       </div>
-      <button class="primary-btn" id="rf-copy">📋 पूरा फॉर्मेटेड टेक्स्ट कॉपी करें</button>
+      <button class="primary-btn" id="rf-copy">${ICON_COPY} पूरा फॉर्मेटेड टेक्स्ट कॉपी करें</button>
     `;
     out.querySelector('#rf-copy').onclick = () => copyText(paras.join('\n\n'));
   };

@@ -60,6 +60,8 @@ button{ font-family:inherit; cursor:pointer; }
 
 img{ max-width:100%; }
 
+.icon{ display:inline-block; vertical-align:-3px; flex-shrink:0; }
+
 /* ---------- Top bar ---------- */
 .topbar{
   position: sticky; top:0; z-index: 40;
@@ -69,8 +71,9 @@ img{ max-width:100%; }
   backdrop-filter: blur(6px);
 }
 .topbar .back-btn{
-  font-size:1.3rem; background:none; border:none; color:var(--ink);
-  padding:.2rem .4rem; border-radius:8px;
+  display:flex; align-items:center; justify-content:center;
+  background:none; border:none; color:var(--ink);
+  padding:.4rem .5rem; border-radius:8px;
 }
 .topbar .back-btn:active{ background: var(--sky-2); }
 .topbar h1{
@@ -78,8 +81,9 @@ img{ max-width:100%; }
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .topbar .icon-btn{
-  background:none; border:none; font-size:1.25rem; color:var(--ink);
-  padding:.3rem .45rem; border-radius:10px; line-height:1;
+  display:flex; align-items:center; justify-content:center;
+  background:none; border:none; color:var(--ink);
+  padding:.4rem .5rem; border-radius:10px; line-height:1;
 }
 .topbar .icon-btn:active{ background: var(--sky-2); }
 
@@ -129,7 +133,7 @@ img{ max-width:100%; }
   background: var(--card-bg); border:1px solid var(--card-border);
   border-radius: 12px; padding:.6rem .8rem; font-size:.9rem;
 }
-.bookmark-row button{ background:none; border:none; color:var(--ink-soft); font-size:1rem; }
+.bookmark-row button{ display:flex; align-items:center; background:none; border:none; color:var(--ink-soft); }
 
 .empty-note{
   padding: 1rem 1.1rem; color: var(--ink-soft); font-size:.9rem; text-align:center;
@@ -167,13 +171,31 @@ img{ max-width:100%; }
 }
 .reader-toolbar.show{ transform: translateY(0); }
 .mode-toggle{
-  display:inline-flex; background: var(--sky-2); border-radius: 20px; padding:2px;
+  display:inline-flex; background: var(--sky-2); border-radius: 20px; padding:2px; flex-shrink:0;
 }
 .mode-toggle button{
+  display:inline-flex; align-items:center; gap:.3rem;
   border:none; background:none; padding:.35rem .8rem; border-radius:18px;
   font-size:.82rem; color: var(--ink-soft);
 }
 .mode-toggle button.active{ background: var(--orange); color:#fff; }
+
+/* Vertical Scrolling switch — only shown in paginated mode (PocketBook-style) */
+.vswitch{
+  display:flex; align-items:center; gap:.4rem; flex-shrink:0;
+  font-size:.78rem; color: var(--ink-soft);
+}
+.vswitch input{ position:absolute; opacity:0; width:0; height:0; }
+.vswitch-track{
+  position:relative; width:34px; height:20px; border-radius:10px;
+  background: var(--sky-2); transition: background .15s; flex-shrink:0;
+}
+.vswitch-thumb{
+  position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%;
+  background:#fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s;
+}
+.vswitch input:checked + .vswitch-track{ background: var(--orange); }
+.vswitch input:checked + .vswitch-track .vswitch-thumb{ transform: translateX(14px); }
 
 .chapter-break{
   margin: 1.6rem 1rem .8rem; padding-top: 1rem;
@@ -216,7 +238,7 @@ img{ max-width:100%; }
   border-top: 1px solid var(--card-border);
 }
 .card-actions button{
-  background:none; border:none; color: var(--ink-soft); font-size:1.05rem;
+  display:flex; align-items:center; background:none; border:none; color: var(--ink-soft);
   padding:.2rem .3rem;
 }
 .card-actions button:active{ color: var(--orange); }
@@ -238,7 +260,7 @@ img{ max-width:100%; }
 .tika-card .card-actions{ border-top-color: var(--teal-border); }
 
 /* Flow content — continuous reading, no card boxes. Shared by vertical flow
-   mode (.flow-feed, tall scrolling column) and book mode (.book-flow, paginated). */
+   mode (.flow-feed, tall scrolling column) and paginated mode (.page-content). */
 .flow-feed{ padding: 1rem 1.3rem 3rem; max-width: 640px; margin: 0 auto; }
 .flow-p{
   max-width: var(--line-ch); margin: 0 auto 1.1rem;
@@ -246,7 +268,6 @@ img{ max-width:100%; }
   font-family: var(--font-deva); color: var(--ink);
   overflow-wrap: anywhere;
 }
-.book-flow .flow-p{ margin-left: auto; margin-right: auto; }
 .flow-vnum{
   font-size: .68rem; color: var(--orange); vertical-align: super; margin-right:.2rem;
 }
@@ -256,7 +277,7 @@ img{ max-width:100%; }
 .flow-en{ font-family: var(--font-latin); color: var(--ink-soft); font-size: calc(var(--font-size) * .88); }
 .flow-tika{ display:block; margin-top:.5rem; padding-top:.5rem; border-top: 1px dashed var(--teal-border); color: var(--ink); }
 .flow-tika-label{ color: var(--teal); }
-.flow-feed .chapter-break, .book-flow .chapter-break{
+.flow-feed .chapter-break{
   margin-left:0; margin-right:0; text-align:center; font-size:1rem; font-weight:700; color: var(--orange);
   padding: .6rem 0; border-bottom: none;
 }
@@ -271,41 +292,42 @@ img{ max-width:100%; }
 .mode-tab .m-sub{ display:block; font-size:.72rem; color:var(--ink-soft); font-weight:400; margin-top:.15rem; }
 .mode-tab.active .m-sub{ color: var(--orange); opacity:.8; }
 
-/* Horizontal paged ("book") mode — real CSS-reflowed pages, not 1 card per page.
-   column-width is set to exactly the wrapper's width via JS-friendly 100% column
-   trick: column-fill + explicit height makes the browser flow content into as many
-   same-width "pages" as the content needs, which we then step through by exactly
-   one clientWidth per page-turn. */
-.book-flow-wrap{
-  position: relative;
-  height: calc(100vh - 220px);
+/* Paginated mode — fixed page boundaries (computed once at a reference font
+   size, see PAGINATION_REF in reader.js), rendered as plain block-flow, not
+   CSS multi-column reflow. .page-content is shared by the offscreen
+   measurement pass and the real rendered page, so both agree exactly on
+   where content sits. */
+.page-content{
+  padding: 1rem 1.3rem 2rem; box-sizing: border-box;
 }
-.book-flow{
-  height: 100%;
-  columns: 1;
-  column-width: 100%;
-  column-gap: 0;
-  column-fill: auto;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  padding: 1.3rem 1.4rem;
-  box-sizing: border-box;
+.page-content .chapter-break{
+  margin-left:0; margin-right:0; text-align:center; font-size:1rem; font-weight:700; color: var(--orange);
+  padding: .6rem 0; border-bottom: none;
 }
-.book-flow::-webkit-scrollbar{ display:none; }
-.book-flow .chapter-break{
-  break-before: column; margin: 0 0 1rem;
+
+/* Paginated + vertical scrolling ON: pages stacked in one scrollable column,
+   each padded up to one screen's height so a short page still occupies a
+   full, visibly-bounded slot — scrolling past it lands you at the next. */
+.page-stack{ display:flex; flex-direction:column; }
+.page-slot{
+  min-height: var(--page-min-h, 70vh);
+  border-bottom: 2px dashed var(--card-border);
+  display:flex; flex-direction:column; justify-content:center;
 }
-.book-flow .flow-p:first-child .chapter-break{ break-before: avoid; }
+.page-slot:last-child{ border-bottom:none; }
+
+/* Paginated + vertical scrolling OFF: only the current page exists in the
+   DOM; a left/right swipe swaps its content for the next/previous page. If
+   the live font size is bigger than the pagination reference size, a page's
+   content can be taller than the screen — overflow-y lets you scroll within
+   that one page without it counting as a page turn. */
+.page-single-wrap{ position:relative; overflow:hidden; }
+.page-single{ height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; }
 .book-tap-zone{
   position:absolute; top:0; bottom:0; width:22%; z-index:5;
 }
 .book-tap-zone.left{ left:0; }
 .book-tap-zone.right{ right:0; }
-
-@media (min-width: 700px){
-  .book-flow-wrap{ height: calc(100vh - 240px); }
-}
 
 /* Tap-to-advance FAB — vertical scroll mode only. Shows current verse ref
    (chapter.verse for Gita-like books, skandh.chapter.verse for Bhagavata),
@@ -317,7 +339,7 @@ img{ max-width:100%; }
   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
   line-height:1;
 }
-.next-verse-fab .nv-arrow{ font-size:1.15rem; }
+.next-verse-fab .nv-arrow{ display:flex; }
 .next-verse-fab .nv-ref{ font-size:.62rem; font-weight:700; }
 .next-verse-fab:active{ transform: scale(.94); }
 
@@ -349,8 +371,9 @@ img{ max-width:100%; }
   background: var(--sky); border-top: 1px solid var(--card-border);
 }
 .scrub-bar .nav-btn, .scrub-bar .chlist-btn{
-  background:none; border:none; font-size:1.15rem; color: var(--ink-soft);
-  padding:.3rem; flex-shrink:0; line-height:1;
+  display:flex; align-items:center; justify-content:center;
+  background:none; border:none; color: var(--ink-soft);
+  padding:.3rem; flex-shrink:0;
 }
 .scrub-bar .nav-btn:disabled{ opacity:.3; }
 .scrub-track-wrap{ position:relative; flex:1; height:28px; display:flex; align-items:center; }
@@ -396,8 +419,8 @@ img{ max-width:100%; }
   max-height: 85vh; overflow-y:auto;
   box-shadow: 0 -4px 24px rgba(0,0,0,.2);
 }
-.sheet h2{ font-size:1.05rem; margin:.2rem 0 1rem; }
-.sheet .close-x{ float:right; background:none; border:none; font-size:1.2rem; color:var(--ink-soft); }
+.sheet h2{ font-size:1.05rem; margin:.2rem 0 1rem; display:flex; align-items:center; gap:.4rem; }
+.sheet .close-x{ float:right; display:flex; background:none; border:none; color:var(--ink-soft); }
 .setting-row{ margin-bottom:1.1rem; }
 .setting-row label{ display:block; font-size:.85rem; color: var(--ink-soft); margin-bottom:.4rem; }
 .setting-row .opt-row{ display:flex; gap:.5rem; flex-wrap:wrap; }

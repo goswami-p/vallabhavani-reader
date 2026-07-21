@@ -12,9 +12,11 @@
 
 const CONTENT_MODES = [
   { key: 'default', label: 'मूल + अनुवाद', sub: 'Default' },
-  { key: 'tika', label: '📘 टीका मोड', sub: 'चुनी हुई टीकाएँ भी दिखेंगी' },
-  { key: 'flow', label: '🌊 प्रवाह मोड', sub: 'केवल अनुवाद — कथा की तरह पढ़ें' }
+  { key: 'tika', label: 'टीका मोड', sub: 'चुनी हुई टीकाएँ भी दिखेंगी' },
+  { key: 'flow', label: 'प्रवाह मोड', sub: 'केवल अनुवाद — कथा की तरह पढ़ें' }
 ];
+
+const CONTENT_MODE_ICONS = { default: '', tika: ICON_TIKA, flow: ICON_FLOW };
 
 /* ---------------- Card rendering (vertical + default/tika) ---------------- */
 function verseCardHtml(v, meta){
@@ -33,8 +35,8 @@ function verseCardHtml(v, meta){
       <div class="v-num">${meta.chapterLabel ? meta.chapterLabel + ' · ' : ''}श्लोक ${v.num}</div>
       ${blocks.join('')}
       <div class="card-actions">
-        <button data-copy-v="${meta.chapterKey}-${v.num}" title="Copy">📋</button>
-        <button data-share-v="${meta.chapterKey}-${v.num}" title="Share">📤</button>
+        <button data-copy-v="${meta.chapterKey}-${v.num}" title="Copy">${ICON_COPY}</button>
+        <button data-share-v="${meta.chapterKey}-${v.num}" title="Share">${ICON_SHARE}</button>
       </div>
     </div>`;
 
@@ -44,11 +46,11 @@ function verseCardHtml(v, meta){
       if(!txt) return;
       html += `
         <div class="tika-card" data-vkey="${meta.chapterKey}-${v.num}-${t.key}" data-chkey="${meta.chapterKey}">
-          <div class="tika-title">📘 ${t.label} <span style="font-weight:400;color:var(--ink-soft)">· ${t.sub}</span></div>
+          <div class="tika-title">${ICON_TIKA} ${t.label} <span style="font-weight:400;color:var(--ink-soft)">· ${t.sub}</span></div>
           <div class="verse-block lang-sa"><p>${txt.replace(/\n/g,'<br>')}</p></div>
           <div class="card-actions">
-            <button data-copy-tika="${meta.chapterKey}-${v.num}-${t.key}" title="Copy">📋</button>
-            <button data-share-tika="${meta.chapterKey}-${v.num}-${t.key}" title="Share">📤</button>
+            <button data-copy-tika="${meta.chapterKey}-${v.num}-${t.key}" title="Copy">${ICON_COPY}</button>
+            <button data-share-tika="${meta.chapterKey}-${v.num}-${t.key}" title="Share">${ICON_SHARE}</button>
           </div>
         </div>`;
     });
@@ -110,7 +112,7 @@ function verseFlowHtml(v, meta){
     if(mode === 'tika' && v.tikas){
       TIKA_DEFS.filter(t => t.available && settings.tikas[t.key]).forEach(t => {
         const txt = v.tikas[t.key];
-        if(txt) parts.push(`<span class="flow-tika"><b class="flow-tika-label">📘 ${t.label}:</b> ${txt.replace(/\n/g,' ')}</span> `);
+        if(txt) parts.push(`<span class="flow-tika"><b class="flow-tika-label">${ICON_TIKA} ${t.label}:</b> ${txt.replace(/\n/g,' ')}</span> `);
       });
     }
   }
@@ -124,6 +126,62 @@ function buildFlowHtml(chapters){
     ch.data.verses.forEach(v => { html += verseFlowHtml(v, { chapterKey: ch.key, chapterLabel: '' }); });
   });
   return html;
+}
+
+/* ---------------- Paginated mode: fixed page boundaries ----------------
+   A page's boundary is decided once, from a reference font size — not
+   recalculated every time the reader picks a bigger/smaller reading font.
+   If a page's content overflows the viewport at the reader's actual font
+   size, they just scroll within that page normally (like scrolling a
+   single long post); only once they reach the page's real, pre-decided
+   end do they get a page turn. This mirrors how a real PDF/EPUB reflow
+   engine keeps page breaks tied to content, not to whatever happens to
+   fit on screen at the moment. */
+const PAGINATION_REF = { fontSize: 1.15, lineHeight: 1.95, lineCh: 30 };
+
+function buildPageBlocks(chapters){
+  const blocks = [];
+  chapters.forEach(ch => {
+    blocks.push({ chKey: ch.key, vnum: null, html: `<h2 class="chapter-break" data-chkey="${ch.key}">${ch.label}</h2>` });
+    ch.data.verses.forEach(v => {
+      blocks.push({ chKey: ch.key, vnum: v.num, html: verseFlowHtml(v, { chapterKey: ch.key, chapterLabel: '' }) });
+    });
+  });
+  return blocks;
+}
+
+function computePages(blocks, containerWidth, containerHeight){
+  const measure = document.createElement('div');
+  measure.className = 'page-content';
+  measure.style.cssText = `position:absolute; left:-9999px; top:0; width:${containerWidth}px; visibility:hidden;`;
+  measure.style.setProperty('--font-size', PAGINATION_REF.fontSize + 'rem');
+  measure.style.setProperty('--line-height', PAGINATION_REF.lineHeight);
+  measure.style.setProperty('--line-ch', PAGINATION_REF.lineCh + 'ch');
+  document.body.appendChild(measure);
+
+  const els = blocks.map(b => {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = b.html;
+    const el = wrap.firstElementChild;
+    measure.appendChild(el);
+    return el;
+  });
+
+  const pages = [];
+  let pageStart = 0;
+  let pageStartTop = els.length ? els[0].offsetTop : 0;
+  for(let i = 0; i < els.length; i++){
+    const bottom = els[i].offsetTop + els[i].offsetHeight - pageStartTop;
+    if(bottom > containerHeight && i > pageStart){
+      pages.push({ start: pageStart, end: i });
+      pageStart = i;
+      pageStartTop = els[i].offsetTop;
+    }
+  }
+  pages.push({ start: pageStart, end: els.length || 0 });
+
+  document.body.removeChild(measure);
+  return pages;
 }
 
 /* ---- Unified reader: a scope (skandh or whole book), optionally starting at one chapter ---- */
@@ -141,19 +199,25 @@ function renderReader(app, book, skandhNum, startChapterKey){
 
   app.innerHTML = `
     <div class="topbar">
-      <button class="back-btn" id="btn-back">←</button>
+      <button class="back-btn" id="btn-back">${ICON_CHEVRON_LEFT}</button>
       <h1 id="reader-title">${scopeLabel}</h1>
-      <button class="icon-btn" id="btn-copy-all" title="Copy chapter">📋</button>
-      <button class="icon-btn" id="btn-share-all" title="Share chapter">📤</button>
-      <button class="icon-btn" id="btn-bookmark" title="Bookmark">🔖</button>
-      <button class="icon-btn" id="btn-settings">⚙️</button>
+      <button class="icon-btn" id="btn-copy-all" title="Copy chapter">${ICON_COPY}</button>
+      <button class="icon-btn" id="btn-share-all" title="Share chapter">${ICON_SHARE}</button>
+      <button class="icon-btn" id="btn-bookmark" title="Bookmark">${ICON_BOOKMARK}</button>
+      <button class="icon-btn" id="btn-settings">${ICON_SETTINGS}</button>
     </div>
     <div class="reader-toolbar">
       <div class="mode-toggle" id="mode-toggle">
-        <button data-mode="vertical" class="${settings.readingMode==='vertical'?'active':''}">⬇️ वर्टिकल स्क्रोल</button>
-        <button data-mode="horizontal" class="${settings.readingMode==='horizontal'?'active':''}">📖 बुक मोड (पेज पलटें)</button>
+        <button data-mode="scroll" class="${settings.readingMode==='scroll'?'active':''}">${ICON_SCROLL} स्क्रॉल</button>
+        <button data-mode="paginated" class="${settings.readingMode==='paginated'?'active':''}">${ICON_PAGES} पेज</button>
       </div>
-      <span class="chip active" style="pointer-events:none">${modeInfo.label}</span>
+      ${settings.readingMode === 'paginated' ? `
+      <label class="vswitch" id="vertScrollSwitch" title="Vertical Scrolling">
+        <input type="checkbox" id="vertScrollToggle" ${settings.paginatedVertical ? 'checked' : ''}>
+        <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
+        <span class="vswitch-label">वर्टिकल स्क्रॉलिंग</span>
+      </label>` : ''}
+      <span class="chip active" style="pointer-events:none">${CONTENT_MODE_ICONS[settings.contentMode] || ''} ${modeInfo.label}</span>
     </div>
     <div id="reader-root"></div>
   `;
@@ -190,6 +254,11 @@ function renderReader(app, book, skandhNum, startChapterKey){
     settings.readingMode = b.dataset.mode; saveSettings(settings);
     renderReader(app, book, skandhNum, currentKey); // keep reading position across mode switch
   });
+  const vertScrollToggle = app.querySelector('#vertScrollToggle');
+  if(vertScrollToggle) vertScrollToggle.onchange = () => {
+    settings.paginatedVertical = vertScrollToggle.checked; saveSettings(settings);
+    renderReader(app, book, skandhNum, currentKey);
+  };
 
   const toolbarEl = app.querySelector('.reader-toolbar');
   if(toolbarEl) toolbarEl.classList.add('show');
@@ -208,11 +277,12 @@ function renderReader(app, book, skandhNum, startChapterKey){
   const verseIndex = {};
   chapters.forEach(ch => ch.data.verses.forEach(v => verseIndex[`${ch.key}-${v.num}`] = v));
 
+  const showVScroll = settings.readingMode === 'scroll' || (settings.readingMode === 'paginated' && settings.paginatedVertical);
   root.innerHTML = `
     <div id="reader-content"></div>
-    ${settings.readingMode === 'vertical' ? `
+    ${showVScroll ? `
     <button class="next-verse-fab" id="nextVerseFab" title="अगला श्लोक — टैप करें">
-      <span class="nv-arrow">⌄</span>
+      <span class="nv-arrow">${ICON_CHEVRON_DOWN}</span>
       <span class="nv-ref" id="nvRef">…</span>
     </button>
     <div class="vscroll-track" id="vscrollTrack">
@@ -220,14 +290,14 @@ function renderReader(app, book, skandhNum, startChapterKey){
       <div class="vscroll-thumb" id="vscrollThumb"></div>
     </div>` : ''}
     <div class="scrub-bar" id="scrubBar">
-      <button class="nav-btn" id="prevChBtn" title="Previous chapter">⏮</button>
+      <button class="nav-btn" id="prevChBtn" title="Previous chapter">${ICON_PREV_TRACK}</button>
       <div class="scrub-track-wrap">
         <div class="scrub-label" id="scrubLabel">1</div>
         <input type="range" class="scrub-range" id="scrubRange" min="0" max="0" value="0" step="1">
         <div class="scrub-dots" id="scrubDots"></div>
       </div>
-      <button class="nav-btn" id="nextChBtn" title="Next chapter">⏭</button>
-      <button class="chlist-btn" id="chListBtn" title="Chapter list">☰</button>
+      <button class="nav-btn" id="nextChBtn" title="Next chapter">${ICON_NEXT_TRACK}</button>
+      <button class="chlist-btn" id="chListBtn" title="Chapter list">${ICON_MENU}</button>
     </div>
   `;
   const content = document.getElementById('reader-content');
@@ -239,56 +309,112 @@ function renderReader(app, book, skandhNum, startChapterKey){
 
   // jumpTo(chKey, verseIdx, behavior) and an onScrollPosition callback get set by whichever branch runs below
   let jumpTo = () => {};
-  let bookFlow = null, pager = null, feed = null;
+  let pager = null, feed = null;
 
-  if(settings.readingMode === 'horizontal'){
-    /* ---- Book mode: real paginated pages via CSS multi-column reflow.
-       Page count adapts to how much content is on screen (mode-dependent),
-       not fixed at one verse per page. ---- */
-    content.innerHTML = `
-      <div class="book-flow-wrap" id="bookFlowWrap">
-        <div class="book-flow" id="bookFlow">${buildFlowHtml(chapters)}</div>
-        <div class="book-tap-zone left" id="tapPrev"></div>
-        <div class="book-tap-zone right" id="tapNext"></div>
-      </div>`;
-    bookFlow = document.getElementById('bookFlow');
-    const wrap = document.getElementById('bookFlowWrap');
+  if(settings.readingMode === 'paginated'){
+    const blocks = buildPageBlocks(chapters);
+    const topbarH = (document.querySelector('.topbar') || {}).offsetHeight || 57;
+    const scrubH = (document.getElementById('scrubBar') || {}).offsetHeight || 64;
+    const pageH = Math.max(200, window.innerHeight - topbarH - scrubH - 16);
+    const pages = computePages(blocks, content.clientWidth, pageH);
+    pager = { blocks, pages };
 
-    function pageWidth(){ return wrap.clientWidth; }
-    function goToPageIndex(idx, behavior){
-      bookFlow.scrollTo({ left: Math.max(0, idx) * pageWidth(), behavior: behavior || 'auto' });
+    function pageIndexForVerse(chKey, vnum){
+      const bi = blocks.findIndex(b => b.chKey === chKey && b.vnum === vnum);
+      const pi = bi < 0 ? 0 : pages.findIndex(p => bi >= p.start && bi < p.end);
+      return pi < 0 ? 0 : pi;
     }
-    document.getElementById('tapPrev').onclick = () => goToPageIndex(Math.round(bookFlow.scrollLeft/pageWidth()) - 1, 'smooth');
-    document.getElementById('tapNext').onclick = () => goToPageIndex(Math.round(bookFlow.scrollLeft/pageWidth()) + 1, 'smooth');
-
-    jumpTo = (chKey, verseIdx, behavior) => {
-      const ch = chapters.find(c => c.key === chKey);
-      const v = ch && ch.data.verses[verseIdx];
-      if(!v) return;
-      const p = bookFlow.querySelector(`.flow-p[data-chkey="${chKey}"][data-vnum="${v.num}"]`);
-      if(p) goToPageIndex(Math.round(p.offsetLeft / pageWidth()), behavior);
-      setCurrentChapter(chKey);
-    };
-
-    let snapTimer;
-    bookFlow.addEventListener('scroll', () => {
-      clearTimeout(snapTimer);
-      snapTimer = setTimeout(() => {
-        const idx = Math.round(bookFlow.scrollLeft / pageWidth());
-        goToPageIndex(idx, 'smooth');
-        updatePositionFromBookFlow();
-      }, 120);
-    });
-    function updatePositionFromBookFlow(){
-      const targetLeft = bookFlow.scrollLeft;
-      const paras = bookFlow.querySelectorAll('.flow-p');
-      let best = null;
-      for(const p of paras){ if(p.offsetLeft <= targetLeft + 4) best = p; else break; }
-      if(!best && paras.length) best = paras[0];
-      if(best) onPositionChange(best.dataset.chkey, parseInt(best.dataset.vnum,10));
+    function pageHtml(pi){
+      const p = pages[pi]; if(!p) return '';
+      return blocks.slice(p.start, p.end).map(b => b.html).join('');
     }
-    // expose for initial jump + scrubber sync
-    jumpTo.__updateFromScroll = updatePositionFromBookFlow;
+    function firstVerseOfPage(pi){
+      const p = pages[pi]; if(!p) return null;
+      for(let i = p.start; i < p.end; i++){ if(blocks[i].vnum != null) return blocks[i]; }
+      return null;
+    }
+
+    let currentPage = 0;
+
+    if(settings.paginatedVertical){
+      /* ---- Paginated + vertical: pages stacked in one scrollable column.
+         Each page gets a min-height of one screen so a short page still
+         occupies a full slot (visible boundary) — scrolling past its
+         bottom carries you straight into the next page's top, PocketBook
+         "Vertical Scrolling ON" style. ---- */
+      content.innerHTML = `<div class="page-stack" id="pageStack" style="--page-min-h:${pageH}px">${
+        pages.map((p, pi) => `<div class="page-slot" data-page="${pi}">${pageHtml(pi)}</div>`).join('')
+      }</div>`;
+      const stack = document.getElementById('pageStack');
+      jumpTo = (chKey, verseIdx, behavior) => {
+        const ch = chapters.find(c => c.key === chKey);
+        const v = ch && ch.data.verses[verseIdx];
+        if(!v) return;
+        const pi = pageIndexForVerse(chKey, v.num);
+        const slot = stack.querySelector(`.page-slot[data-page="${pi}"]`);
+        if(slot) slot.scrollIntoView({ block: 'start', behavior: behavior || 'auto' });
+        setCurrentChapter(chKey);
+      };
+      if(window.IntersectionObserver){
+        const io = new IntersectionObserver((entries) => {
+          entries.forEach(e => {
+            if(e.isIntersecting){
+              currentPage = parseInt(e.target.dataset.page, 10);
+              const fv = firstVerseOfPage(currentPage);
+              if(fv) onPositionChange(fv.chKey, fv.vnum);
+            }
+          });
+        }, { rootMargin: '0px 0px -75% 0px', threshold: 0 });
+        stack.querySelectorAll('.page-slot').forEach(s => io.observe(s));
+      }
+
+    } else {
+      /* ---- Paginated + horizontal: only the current page exists in the
+         DOM; a left/right swipe swaps it for the next/previous page's
+         content outright — no CSS multi-column reflow, so there's no
+         rounding drift between a measured width and the rendered layout
+         to land the viewport between two pages. ---- */
+      content.innerHTML = `
+        <div class="page-single-wrap" id="pageSingleWrap" style="height:${pageH}px">
+          <div class="page-single" id="pageSingle"></div>
+          <div class="book-tap-zone left" id="tapPrev"></div>
+          <div class="book-tap-zone right" id="tapNext"></div>
+        </div>`;
+      const wrap = document.getElementById('pageSingleWrap');
+      const singleEl = document.getElementById('pageSingle');
+
+      function renderPage(pi){
+        pi = Math.max(0, Math.min(pages.length - 1, pi));
+        currentPage = pi;
+        singleEl.scrollTop = 0;
+        singleEl.innerHTML = pageHtml(pi);
+        const fv = firstVerseOfPage(pi);
+        if(fv){ setCurrentChapter(fv.chKey); onPositionChange(fv.chKey, fv.vnum); }
+      }
+      document.getElementById('tapPrev').onclick = () => renderPage(currentPage - 1);
+      document.getElementById('tapNext').onclick = () => renderPage(currentPage + 1);
+
+      let touchStartX = null, touchStartY = null;
+      wrap.addEventListener('touchstart', (e) => {
+        touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY;
+      }, { passive: true });
+      wrap.addEventListener('touchend', (e) => {
+        if(touchStartX == null) return;
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        const dy = e.changedTouches[0].clientY - touchStartY;
+        touchStartX = null;
+        if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5){
+          if(dx < 0) renderPage(currentPage + 1); else renderPage(currentPage - 1);
+        }
+      }, { passive: true });
+
+      jumpTo = (chKey, verseIdx, behavior) => {
+        const ch = chapters.find(c => c.key === chKey);
+        const v = ch && ch.data.verses[verseIdx];
+        if(!v) return;
+        renderPage(pageIndexForVerse(chKey, v.num));
+      };
+    }
 
   } else if(settings.contentMode === 'flow'){
     /* ---- Vertical + flow mode: continuous "read like a story" scroll, no cards ---- */
@@ -530,12 +656,12 @@ function openChapterListSheet(app, book, skandhNum, chapters, currentKey, onPick
   overlay.className = 'sheet-overlay';
   overlay.innerHTML = `
     <div class="sheet">
-      <button class="close-x">✕</button>
-      <h2>☰ पढ़ने का तरीका / Chapters</h2>
+      <button class="close-x">${ICON_CLOSE}</button>
+      <h2>${ICON_MENU} पढ़ने का तरीका / Chapters</h2>
       <div class="setting-row">
         <label>कंटेंट मोड / Content mode</label>
         <div class="mode-tabs">
-          ${CONTENT_MODES.map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
+          ${CONTENT_MODES.map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${CONTENT_MODE_ICONS[m.key]} ${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
         </div>
       </div>
       <div class="setting-row">
