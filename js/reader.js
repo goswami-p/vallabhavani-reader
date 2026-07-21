@@ -195,7 +195,6 @@ function renderReader(app, book, skandhNum, startChapterKey){
   if(startChapterKey && startKey !== startChapterKey){
     toast('यह अध्याय अभी खाली है — उपलब्ध सामग्री दिखा रहे हैं / This chapter is empty — showing available content');
   }
-  const modeInfo = CONTENT_MODES.find(m => m.key === settings.contentMode) || CONTENT_MODES[0];
 
   app.innerHTML = `
     <div class="topbar">
@@ -204,27 +203,17 @@ function renderReader(app, book, skandhNum, startChapterKey){
       <button class="icon-btn" id="btn-copy-all" title="Copy chapter">${ICON_COPY}</button>
       <button class="icon-btn" id="btn-share-all" title="Share chapter">${ICON_SHARE}</button>
       <button class="icon-btn" id="btn-bookmark" title="Bookmark">${ICON_BOOKMARK}</button>
-      <button class="icon-btn" id="btn-settings">${ICON_SETTINGS}</button>
-    </div>
-    <div class="reader-toolbar">
-      <div class="mode-toggle" id="mode-toggle">
-        <button data-mode="scroll" class="${settings.readingMode==='scroll'?'active':''}">${ICON_SCROLL} स्क्रॉल</button>
-        <button data-mode="paginated" class="${settings.readingMode==='paginated'?'active':''}">${ICON_PAGES} पेज</button>
-      </div>
-      ${settings.readingMode === 'paginated' ? `
-      <label class="vswitch" id="vertScrollSwitch" title="Vertical Scrolling">
-        <input type="checkbox" id="vertScrollToggle" ${settings.paginatedVertical ? 'checked' : ''}>
-        <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
-        <span class="vswitch-label">वर्टिकल स्क्रॉलिंग</span>
-      </label>` : ''}
-      <span class="chip active" style="pointer-events:none">${CONTENT_MODE_ICONS[settings.contentMode] || ''} ${modeInfo.label}</span>
+      <button class="icon-btn" id="btn-search" title="Find in page">${ICON_SEARCH}</button>
     </div>
     <div id="reader-root"></div>
   `;
 
   const titleEl = app.querySelector('#reader-title');
   app.querySelector('#btn-back').onclick = () => navigate(backHref);
-  app.querySelector('#btn-settings').onclick = () => openSettingsSheet();
+  app.querySelector('#btn-search').onclick = () => openFindInPage(app, book, chapters, (chKey, vnum) => {
+    const idx = chapters.find(c => c.key === chKey).data.verses.findIndex(v => v.num === vnum);
+    if(idx >= 0) jumpTo(chKey, idx, 'smooth');
+  });
 
   let currentKey = startKey;
   function currentChapter(){ return chapters.find(c => c.key === currentKey); }
@@ -249,19 +238,6 @@ function renderReader(app, book, skandhNum, startChapterKey){
     const ch = currentChapter();
     if(ch) shareText(chapterAsText(ch.data.title, ch.data.verses, settings.langs), ch.label);
   };
-
-  app.querySelector('#mode-toggle').querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
-    settings.readingMode = b.dataset.mode; saveSettings(settings);
-    renderReader(app, book, skandhNum, currentKey); // keep reading position across mode switch
-  });
-  const vertScrollToggle = app.querySelector('#vertScrollToggle');
-  if(vertScrollToggle) vertScrollToggle.onchange = () => {
-    settings.paginatedVertical = vertScrollToggle.checked; saveSettings(settings);
-    renderReader(app, book, skandhNum, currentKey);
-  };
-
-  const toolbarEl = app.querySelector('.reader-toolbar');
-  if(toolbarEl) toolbarEl.classList.add('show');
 
   const root = document.getElementById('reader-root');
 
@@ -343,7 +319,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
          bottom carries you straight into the next page's top, PocketBook
          "Vertical Scrolling ON" style. ---- */
       content.innerHTML = `<div class="page-stack" id="pageStack" style="--page-min-h:${pageH}px">${
-        pages.map((p, pi) => `<div class="page-slot" data-page="${pi}">${pageHtml(pi)}</div>`).join('')
+        pages.map((p, pi) => `<div class="page-slot" data-page="${pi}"><div class="page-content">${pageHtml(pi)}</div></div>`).join('')
       }</div>`;
       const stack = document.getElementById('pageStack');
       jumpTo = (chKey, verseIdx, behavior) => {
@@ -387,7 +363,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
         pi = Math.max(0, Math.min(pages.length - 1, pi));
         currentPage = pi;
         singleEl.scrollTop = 0;
-        singleEl.innerHTML = pageHtml(pi);
+        singleEl.innerHTML = `<div class="page-content">${pageHtml(pi)}</div>`;
         const fv = firstVerseOfPage(pi);
         if(fv){ setCurrentChapter(fv.chKey); onPositionChange(fv.chKey, fv.vnum); }
       }
@@ -543,27 +519,6 @@ function renderReader(app, book, skandhNum, startChapterKey){
   setScrub(0, chapters.find(c=>c.key===currentKey).data.verses.length);
   jumpTo(currentKey, 0, 'auto'); // ensure initial scroll/page position lands exactly on startKey (needed for book mode's layout-dependent offsets)
 
-  /* ---- Mode-toggle bar auto-hides while scrolling down, reappears on
-     scroll-up so it's reachable without hogging screen space permanently.
-     Armed on a short delay so that landing deep in the book (e.g. opening
-     chapter 5 directly, which itself fires a couple of settling scroll
-     events as the initial jumpTo above lands) isn't mistaken for a
-     scroll-down gesture that immediately hides the bar. ---- */
-  if(window.__vvToolbarScrollHandler) window.removeEventListener('scroll', window.__vvToolbarScrollHandler);
-  if(toolbarEl){
-    let lastY = window.scrollY;
-    const onToolbarScroll = () => {
-      const y = window.scrollY;
-      if(y < 40 || y < lastY - 4) toolbarEl.classList.add('show');
-      else if(y > lastY + 4) toolbarEl.classList.remove('show');
-      lastY = y;
-    };
-    window.__vvToolbarScrollHandler = onToolbarScroll;
-    setTimeout(() => {
-      lastY = window.scrollY;
-      window.addEventListener('scroll', onToolbarScroll, { passive: true });
-    }, 300);
-  }
   if(nvRef){
     const firstV = chapters.find(c=>c.key===currentKey).data.verses[0];
     if(firstV) nvRef.textContent = verseRefLabel(book, currentKey, firstV.num);
@@ -596,7 +551,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
 
   prevChBtn.onclick = () => { const idx = chapters.findIndex(c=>c.key===currentKey); if(idx>0) jumpToChapterStart(chapters[idx-1].key); };
   nextChBtn.onclick = () => { const idx = chapters.findIndex(c=>c.key===currentKey); if(idx>=0 && idx<chapters.length-1) jumpToChapterStart(chapters[idx+1].key); };
-  chListBtn.onclick = () => openChapterListSheet(app, book, skandhNum, chapters, currentKey, (key) => jumpToChapterStart(key));
+  chListBtn.onclick = () => openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, (key) => jumpToChapterStart(key));
 
   /* ---- Right-edge vertical scroll thumb — fast drag-to-scrub for vertical mode,
      same idea as a desktop scrollbar handle, since phones hide the native one. ---- */
@@ -651,52 +606,180 @@ function renderReader(app, book, skandhNum, startChapterKey){
   window.__vvRenderReader = () => renderReader(app, book, skandhNum, currentKey);
 }
 
-function openChapterListSheet(app, book, skandhNum, chapters, currentKey, onPick){
+/* ---- The hamburger sheet: Contents (chapter list) | View (what & how it's
+   displayed) | Settings (typography/appearance) — three tabs so the reader's
+   own top toolbar can stay clean instead of permanently showing every mode
+   toggle. `initialTab` lets a rebuild (e.g. after a theme change) reopen on
+   the same tab instead of jumping back to Contents. ---- */
+function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick, initialTab){
+  const tab = initialTab || 'contents';
   const overlay = document.createElement('div');
   overlay.className = 'sheet-overlay';
   overlay.innerHTML = `
-    <div class="sheet">
+    <div class="sheet reader-menu-sheet">
       <button class="close-x">${ICON_CLOSE}</button>
-      <h2>${ICON_MENU} पढ़ने का तरीका / Chapters</h2>
-      <div class="setting-row">
-        <label>कंटेंट मोड / Content mode</label>
-        <div class="mode-tabs">
-          ${CONTENT_MODES.map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${CONTENT_MODE_ICONS[m.key]} ${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
+      <div class="tab-bar">
+        <button class="tab-btn ${tab==='contents'?'active':''}" data-tab="contents">${ICON_LIST}<span>सूची</span></button>
+        <button class="tab-btn ${tab==='view'?'active':''}" data-tab="view">${ICON_EYE}<span>दृश्य</span></button>
+        <button class="tab-btn ${tab==='settings'?'active':''}" data-tab="settings">${ICON_SETTINGS}<span>सेटिंग्स</span></button>
+      </div>
+
+      <div class="tab-panel" data-panel="contents" ${tab==='contents'?'':'hidden'}>
+        <div class="setting-row">
+          ${chapters.map(c => `<button class="chlist-item ${c.key===currentKey?'current':''}" data-key="${c.key}">${c.label}</button>`).join('')}
         </div>
       </div>
-      <div class="setting-row">
-        <label>टीकाएँ / Commentaries — टिक करते ही टीका मोड चालू हो जाएगा</label>
-        <div class="tika-list">
-          ${TIKA_DEFS.map(t => `
-            <label class="tika-row ${t.available?'':'disabled'}">
-              <input type="checkbox" data-sheet-tika="${t.key}" ${settings.tikas[t.key]?'checked':''} ${t.available?'':'disabled'}>
-              <span class="t-label">${t.label}</span>
-              <span class="t-sub">${t.sub}</span>
-            </label>`).join('')}
+
+      <div class="tab-panel" data-panel="view" ${tab==='view'?'':'hidden'}>
+        <div class="setting-row">
+          <label>पढ़ने का ढंग / Reading mode</label>
+          <div class="mode-toggle" id="mode-toggle">
+            <button data-mode="scroll" class="${settings.readingMode==='scroll'?'active':''}">${ICON_SCROLL} स्क्रॉल</button>
+            <button data-mode="paginated" class="${settings.readingMode==='paginated'?'active':''}">${ICON_PAGES} पेज</button>
+          </div>
+        </div>
+        ${settings.readingMode === 'paginated' ? `
+        <div class="setting-row">
+          <label class="vswitch" id="vertScrollSwitch">
+            <input type="checkbox" id="vertScrollToggle" ${settings.paginatedVertical ? 'checked' : ''}>
+            <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
+            <span class="vswitch-label">वर्टिकल स्क्रॉलिंग / Vertical Scrolling</span>
+          </label>
+        </div>` : ''}
+        <div class="setting-row">
+          <label>कंटेंट मोड / Content mode</label>
+          <div class="mode-tabs">
+            ${CONTENT_MODES.map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${CONTENT_MODE_ICONS[m.key]} ${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>टीकाएँ / Commentaries — टिक करते ही टीका मोड चालू हो जाएगा</label>
+          <div class="tika-list">
+            ${TIKA_DEFS.map(t => `
+              <label class="tika-row ${t.available?'':'disabled'}">
+                <input type="checkbox" data-sheet-tika="${t.key}" ${settings.tikas[t.key]?'checked':''} ${t.available?'':'disabled'}>
+                <span class="t-label">${t.label}</span>
+                <span class="t-sub">${t.sub}</span>
+              </label>`).join('')}
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>भाषाएँ / Languages</label>
+          <div class="opt-row">
+            ${['sa','hi','en'].map(l => `<button class="chip ${settings.langs[l]?'active':''}" data-lang="${l}">${({sa:'संस्कृत',hi:'हिन्दी',en:'English'})[l]}</button>`).join('')}
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>पेज डिवाइडर / Page dividers (scroll mode)</label>
+          <div class="opt-row">
+            <button class="chip ${settings.pageDividers?'active':''}" id="toggle-dividers">${settings.pageDividers?'चालू / On':'बंद / Off'}</button>
+          </div>
         </div>
       </div>
-      <div class="setting-row">
-        <label>अध्याय सूची / Chapters</label>
-        ${chapters.map(c => `<button class="chlist-item ${c.key===currentKey?'current':''}" data-key="${c.key}">${c.label}</button>`).join('')}
+
+      <div class="tab-panel" data-panel="settings" ${tab==='settings'?'':'hidden'}>
+        ${appearanceControlsHtml()}
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+
+  const tabBtns = overlay.querySelectorAll('.tab-btn');
+  const panels = overlay.querySelectorAll('.tab-panel');
+  tabBtns.forEach(btn => btn.onclick = () => {
+    tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+    panels.forEach(p => p.hidden = p.dataset.panel !== btn.dataset.tab);
+  });
+
   overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
   overlay.querySelector('.close-x').onclick = () => overlay.remove();
   overlay.querySelectorAll('[data-key]').forEach(b => b.onclick = () => { overlay.remove(); onPick(b.dataset.key); });
+
+  const reRender = () => { if(window.__vvRenderReader) window.__vvRenderReader(); };
+  const modeToggle = overlay.querySelector('#mode-toggle');
+  if(modeToggle) modeToggle.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+    settings.readingMode = b.dataset.mode; saveSettings(settings); overlay.remove(); reRender();
+  });
+  const vst = overlay.querySelector('#vertScrollToggle');
+  if(vst) vst.onchange = () => { settings.paginatedVertical = vst.checked; saveSettings(settings); overlay.remove(); reRender(); };
   overlay.querySelectorAll('[data-sheet-tika]').forEach(cb => cb.onchange = () => {
     settings.tikas[cb.dataset.sheetTika] = cb.checked;
     if(cb.checked) settings.contentMode = 'tika';
-    saveSettings(settings);
-    overlay.remove();
-    renderReader(app, book, skandhNum, currentKey);
+    saveSettings(settings); overlay.remove(); reRender();
   });
   overlay.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
-    settings.contentMode = b.dataset.m; saveSettings(settings);
-    overlay.remove();
-    renderReader(app, book, skandhNum, currentKey);
+    settings.contentMode = b.dataset.m; saveSettings(settings); overlay.remove(); reRender();
   });
+  overlay.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => {
+    settings.langs[b.dataset.lang] = !settings.langs[b.dataset.lang]; saveSettings(settings); overlay.remove(); reRender();
+  });
+  const dv = overlay.querySelector('#toggle-dividers');
+  if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); overlay.remove(); reRender(); };
+
+  // Theme changes need the sheet HTML rebuilt (swatch highlight, custom-color
+  // pickers) — reopen on the Settings tab specifically, not back to Contents.
+  wireAppearanceControls(overlay, () => {
+    overlay.remove();
+    openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick, 'settings');
+  });
+}
+
+/* ---- Find in page: searches mula/hindi/english text across every verse in
+   the current scope and jumps straight to a tapped result. ---- */
+function openFindInPage(app, book, chapters, onJump){
+  const overlay = document.createElement('div');
+  overlay.className = 'sheet-overlay find-overlay';
+  overlay.innerHTML = `
+    <div class="sheet find-sheet">
+      <div class="find-bar">
+        ${ICON_SEARCH}
+        <input type="text" id="find-input" placeholder="इस पुस्तक में खोजें / Search this book…">
+        <button class="close-x" id="find-close">${ICON_CLOSE}</button>
+      </div>
+      <div class="find-results" id="find-results"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#find-input');
+  const results = overlay.querySelector('#find-results');
+  input.focus();
+
+  function highlight(escapedText, rawQuery){
+    const re = new RegExp('(' + rawQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
+    return escapedText.replace(re, '<mark>$1</mark>');
+  }
+
+  function search(q){
+    q = q.trim();
+    if(q.length < 2){ results.innerHTML = ''; return; }
+    const qLower = q.toLowerCase();
+    const hits = [];
+    outer:
+    for(const ch of chapters){
+      for(const v of ch.data.verses){
+        const hitField = [v.sa, v.hi, v.en].filter(Boolean).find(f => f.toLowerCase().includes(qLower));
+        if(hitField){
+          hits.push({ chKey: ch.key, chLabel: ch.label, vnum: v.num, snippet: hitField });
+          if(hits.length >= 50) break outer;
+        }
+      }
+    }
+    if(!hits.length){ results.innerHTML = `<div class="find-empty">कोई परिणाम नहीं मिला / No matches</div>`; return; }
+    results.innerHTML = hits.map(h => `
+      <button class="find-result" data-ch="${h.chKey}" data-v="${h.vnum}">
+        <div class="find-result-ref">${h.chLabel} · श्लोक ${h.vnum}</div>
+        <div class="find-result-snippet">${highlight(escapeHtml(h.snippet), q)}</div>
+      </button>`).join('');
+    results.querySelectorAll('.find-result').forEach(b => b.onclick = () => {
+      overlay.remove();
+      onJump(b.dataset.ch, parseInt(b.dataset.v, 10));
+    });
+  }
+
+  let debounceTimer;
+  input.oninput = () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => search(input.value), 150); };
+  overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#find-close').onclick = () => overlay.remove();
 }
 
 function verseRefLabel(book, chapterKey, verseNum){

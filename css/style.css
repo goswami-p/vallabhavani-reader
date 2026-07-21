@@ -18,10 +18,12 @@
   --font-deva:  'Tiro Devanagari Hindi', 'Noto Sans Devanagari', 'Kohinoor Devanagari', sans-serif;
 
   --font-size: 1.15rem;
-  --line-ch: 30ch;
+  --line-ch: 32ch;      /* fixed reading-column width — auto-scales with font-size via the ch unit itself, not a user setting */
+  --page-margin: 1.3rem;
   --line-height: 1.95;
 
   --radius: 16px;
+  --page-shadow: 0 14px 22px -12px rgba(20,15,10,.35), 0 2px 6px rgba(20,15,10,.08);
 }
 
 /* Theme: sepia (Pocketbook style) */
@@ -30,6 +32,7 @@
   --ink: #4a3826; --ink-soft: #6b5842;
   --card-bg: #faf3e3; --card-border: #e6d6b8;
   --shadow: 0 2px 10px rgba(80,60,20,0.08);
+  --page-shadow: 0 14px 22px -12px rgba(60,45,15,.4), 0 2px 6px rgba(60,45,15,.1);
 }
 
 /* Theme: dark */
@@ -38,6 +41,7 @@
   --ink: #eae6df; --ink-soft: #b9b2a6;
   --card-bg: #1d2228; --card-border: #2b323b;
   --shadow: 0 2px 14px rgba(0,0,0,0.35);
+  --page-shadow: 0 14px 24px -10px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.3);
   --orange: #f0a15c; --orange-2: #f4b578;
 }
 
@@ -160,18 +164,8 @@ img{ max-width:100%; }
 }
 
 /* ---------- Reader ---------- */
-.reader-toolbar{
-  position: fixed; top: 57px; left:0; right:0; z-index: 39;
-  display:flex; gap:.4rem; padding:.4rem 1rem; overflow-x:auto;
-  align-items:center;
-  background: linear-gradient(180deg, var(--sky) 85%, transparent);
-  backdrop-filter: blur(6px);
-  transform: translateY(-120%);
-  transition: transform .2s ease;
-}
-.reader-toolbar.show{ transform: translateY(0); }
 .mode-toggle{
-  display:inline-flex; background: var(--sky-2); border-radius: 20px; padding:2px; flex-shrink:0;
+  display:inline-flex; background: var(--sky-2); border-radius: 20px; padding:2px;
 }
 .mode-toggle button{
   display:inline-flex; align-items:center; gap:.3rem;
@@ -182,8 +176,8 @@ img{ max-width:100%; }
 
 /* Vertical Scrolling switch — only shown in paginated mode (PocketBook-style) */
 .vswitch{
-  display:flex; align-items:center; gap:.4rem; flex-shrink:0;
-  font-size:.78rem; color: var(--ink-soft);
+  display:flex; align-items:center; gap:.5rem;
+  font-size:.85rem; color: var(--ink);
 }
 .vswitch input{ position:absolute; opacity:0; width:0; height:0; }
 .vswitch-track{
@@ -206,7 +200,7 @@ img{ max-width:100%; }
 /* Vertical continuous ("webtoon") mode */
 .verse-feed{
   display:flex; flex-direction:column; gap: 1rem;
-  padding: .8rem 1rem 3rem;
+  padding: .8rem var(--page-margin) 3rem;
 }
 .verse-feed.no-dividers .verse-card{ border-bottom:none; }
 
@@ -261,7 +255,7 @@ img{ max-width:100%; }
 
 /* Flow content — continuous reading, no card boxes. Shared by vertical flow
    mode (.flow-feed, tall scrolling column) and paginated mode (.page-content). */
-.flow-feed{ padding: 1rem 1.3rem 3rem; max-width: 640px; margin: 0 auto; }
+.flow-feed{ padding: 1rem var(--page-margin) 3rem; max-width: 640px; margin: 0 auto; }
 .flow-p{
   max-width: var(--line-ch); margin: 0 auto 1.1rem;
   font-size: var(--font-size); line-height: var(--line-height);
@@ -298,23 +292,26 @@ img{ max-width:100%; }
    measurement pass and the real rendered page, so both agree exactly on
    where content sits. */
 .page-content{
-  padding: 1rem 1.3rem 2rem; box-sizing: border-box;
+  padding: 1rem var(--page-margin) 2rem; box-sizing: border-box;
 }
 .page-content .chapter-break{
   margin-left:0; margin-right:0; text-align:center; font-size:1rem; font-weight:700; color: var(--orange);
   padding: .6rem 0; border-bottom: none;
 }
 
-/* Paginated + vertical scrolling ON: pages stacked in one scrollable column,
-   each padded up to one screen's height so a short page still occupies a
-   full, visibly-bounded slot — scrolling past it lands you at the next. */
-.page-stack{ display:flex; flex-direction:column; }
+/* Paginated + vertical scrolling ON: pages stacked in one scrollable column.
+   Each page is its own shadowed card (PocketBook-style — the shadow reads as
+   the page's physical edge) with a visible gap before the next one begins.
+   Deliberately NOT a dashed rule — that's already used for chapter breaks
+   (inside a page, scroll mode) and would be impossible to tell apart from a
+   page boundary; a page boundary needs its own distinct visual language. */
+.page-stack{ display:flex; flex-direction:column; gap: 18px; padding: 10px 8px 28px; }
 .page-slot{
   min-height: var(--page-min-h, 70vh);
-  border-bottom: 2px dashed var(--card-border);
-  display:flex; flex-direction:column; justify-content:center;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--page-shadow);
 }
-.page-slot:last-child{ border-bottom:none; }
 
 /* Paginated + vertical scrolling OFF: only the current page exists in the
    DOM; a left/right swipe swaps its content for the next/previous page. If
@@ -421,6 +418,21 @@ img{ max-width:100%; }
 }
 .sheet h2{ font-size:1.05rem; margin:.2rem 0 1rem; display:flex; align-items:center; gap:.4rem; }
 .sheet .close-x{ float:right; display:flex; background:none; border:none; color:var(--ink-soft); }
+
+/* Reader's hamburger sheet: Contents | View | Settings tabs */
+.reader-menu-sheet .close-x{ margin-bottom:.4rem; }
+.tab-bar{
+  display:flex; gap:.3rem; background: var(--sky-2); border-radius:14px; padding:3px;
+  margin: 0 0 1rem; clear:both;
+}
+.tab-btn{
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:.2rem;
+  border:none; background:none; padding:.5rem .3rem; border-radius:11px;
+  font-size:.72rem; color: var(--ink-soft);
+}
+.tab-btn.active{ background: var(--card-bg); color: var(--orange); box-shadow: var(--shadow); }
+.tab-panel{ padding-top:.1rem; }
+
 .setting-row{ margin-bottom:1.1rem; }
 .setting-row label{ display:block; font-size:.85rem; color: var(--ink-soft); margin-bottom:.4rem; }
 .setting-row .opt-row{ display:flex; gap:.5rem; flex-wrap:wrap; }
@@ -476,6 +488,31 @@ input[type=color]{ width:44px; height:34px; border:none; background:none; }
   text-align:center; padding: 2rem 1rem 1rem; font-size:.8rem; color: var(--ink-soft);
 }
 .foot-links a{ margin:0 .5rem; }
+
+/* ---------- Find in page ---------- */
+.find-overlay{ align-items:flex-start; }
+.find-sheet{
+  border-radius: 0 0 20px 20px; padding: .8rem 1rem 1rem;
+  max-height: 90vh; margin-top: env(safe-area-inset-top);
+}
+.find-bar{
+  display:flex; align-items:center; gap:.6rem;
+  background: var(--card-bg); border:1px solid var(--card-border); border-radius:12px;
+  padding:.6rem .8rem; color: var(--ink-soft);
+}
+.find-bar input{
+  flex:1; border:none; background:none; outline:none; color:var(--ink); font-size:.95rem; font-family:inherit;
+}
+.find-bar .close-x{ display:flex; background:none; border:none; color:var(--ink-soft); }
+.find-results{ margin-top:.8rem; display:flex; flex-direction:column; gap:.5rem; }
+.find-result{
+  display:block; width:100%; text-align:left; background: var(--card-bg);
+  border:1px solid var(--card-border); border-radius:12px; padding:.6rem .8rem;
+}
+.find-result-ref{ font-size:.72rem; color: var(--orange); font-weight:700; margin-bottom:.2rem; }
+.find-result-snippet{ font-size:.85rem; color: var(--ink); line-height:1.5; }
+.find-result-snippet mark{ background: var(--orange-2); color:#2e2a26; border-radius:3px; padding:0 .1em; }
+.find-empty{ text-align:center; color: var(--ink-soft); font-size:.85rem; padding:1.5rem 0; }
 
 @media (min-width: 700px){
   .verse-pager{ height: calc(100vh - 170px); }

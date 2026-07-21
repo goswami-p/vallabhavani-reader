@@ -7,8 +7,8 @@ const DEFAULT_SETTINGS = {
   customText: '#2e2a26',
   fontFamily: 'deva',        // deva | latin-serif | latin-sans
   fontSize: 1.15,            // rem
-  lineCh: 30,                // ch units -> controls words-per-line
-  lineHeight: 1.95,
+  pageMargin: 1.3,           // rem — page/card horizontal padding ("Border" in PocketBook terms)
+  lineHeight: 1.95,          // ("Spacing" in PocketBook terms)
   langs: { sa: true, hi: true, en: false },
   readingMode: 'scroll',     // scroll (infinite) | paginated (fixed page boundaries)
   paginatedVertical: false,  // paginated mode only: false = swipe left/right, true = scroll down through page boundaries
@@ -32,7 +32,12 @@ const ICON_CHEVRON_LEFT = `<svg class="icon" viewBox="0 0 20 20" width="18" heig
 const ICON_CHEVRON_RIGHT = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4.5l6 5.5-6 5.5"/></svg>`;
 const ICON_TIKA = `<svg class="icon" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.5" width="14" height="10" rx="2"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="11" y2="10"/><path d="M7 13.5l-1.6 3 3-1.8"/></svg>`;
 const ICON_FLOW = `<svg class="icon" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 7c1.5-2 3-2 4.5 0s3 2 4.5 0 3-2 4.5 0 3 2 4.5 0"/><path d="M2 13c1.5-2 3-2 4.5 0s3 2 4.5 0 3-2 4.5 0 3 2 4.5 0"/></svg>`;
-const ICON_SETTINGS = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="2.6"/><path d="M10 3v1.6M10 15.4V17M17 10h-1.6M4.6 10H3M14.9 5.1l-1.13 1.13M6.23 13.67L5.1 14.9M14.9 14.9l-1.13-1.13M6.23 6.33L5.1 5.1"/></svg>`;
+const ICON_SETTINGS = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="3" y1="5" x2="17" y2="5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="15" x2="17" y2="15"/><circle cx="11" cy="5" r="1.9" fill="currentColor" stroke="none"/><circle cx="6" cy="10" r="1.9" fill="currentColor" stroke="none"/><circle cx="14" cy="15" r="1.9" fill="currentColor" stroke="none"/></svg>`;
+const ICON_SEARCH = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8.5" r="5.5"/><line x1="16.5" y1="16.5" x2="12.7" y2="12.7"/></svg>`;
+const ICON_LIST = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="7" y1="5" x2="17" y2="5"/><line x1="7" y1="10" x2="17" y2="10"/><line x1="7" y1="15" x2="17" y2="15"/><circle cx="3.3" cy="5" r="1" fill="currentColor" stroke="none"/><circle cx="3.3" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="3.3" cy="15" r="1" fill="currentColor" stroke="none"/></svg>`;
+const ICON_EYE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></svg>`;
+const ICON_BORDER = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="1.5"/><rect x="6.5" y="6.5" width="7" height="7" rx="1" stroke-dasharray="1.6 1.4"/></svg>`;
+const ICON_SPACING = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="4" x2="17" y2="4"/><line x1="5" y1="10" x2="17" y2="10"/><line x1="5" y1="16" x2="17" y2="16"/><path d="M2 6.2l1.3-1.7 1.3 1.7M2 13.8l1.3 1.7 1.3-1.7"/></svg>`;
 const ICON_COPY = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4.5" width="9.5" height="11.5" rx="1.4"/><path d="M4 7v9a1.4 1.4 0 0 0 1.4 1.4H12"/></svg>`;
 const ICON_SHARE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v9"/><path d="M6.5 6.5L10 3l3.5 3.5"/><path d="M4 11.5V16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-4.5"/></svg>`;
 const ICON_BOOKMARK = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h9a1 1 0 0 1 1 1V17l-5.5-3.3L4.5 17V4.5a1 1 0 0 1 1-1z"/></svg>`;
@@ -86,7 +91,7 @@ function applySettingsToDOM(){
   };
   root.style.setProperty('--font-deva', famMap[settings.fontFamily] || famMap.deva);
   root.style.setProperty('--font-size', settings.fontSize + 'rem');
-  root.style.setProperty('--line-ch', settings.lineCh + 'ch');
+  root.style.setProperty('--page-margin', settings.pageMargin + 'rem');
   root.style.setProperty('--line-height', settings.lineHeight);
 }
 
@@ -375,7 +380,71 @@ function wireTopbar(app){
   if(set) set.onclick = () => openSettingsSheet();
 }
 
-/* ---------------- Settings sheet ---------------- */
+/* ---------------- Shared appearance controls: theme, font, border (page
+   margin), spacing (line height) — PocketBook's font/border/spacing trio.
+   Shared by the standalone settings sheet (home/book/skandh views) and the
+   reader's own Settings tab so the two never drift apart. ---------------- */
+function appearanceControlsHtml(){
+  return `
+    <div class="setting-row">
+      <label>थीम / Theme</label>
+      <div class="opt-row">
+        ${['light','sepia','dark','custom'].map(t => `<button class="chip ${settings.theme===t?'active':''}" data-theme="${t}">${t}</button>`).join('')}
+      </div>
+      ${settings.theme==='custom' ? `
+        <div class="opt-row" style="margin-top:.6rem">
+          बैकग्राउंड <input type="color" id="custom-bg" value="${settings.customBg}">
+          टेक्स्ट <input type="color" id="custom-text" value="${settings.customText}">
+        </div>`: ''}
+    </div>
+    <div class="setting-row">
+      <label>फॉन्ट फ़ैमिली / Font family</label>
+      <select id="font-family">
+        <option value="deva" ${settings.fontFamily==='deva'?'selected':''}>Devanagari (Tiro / Noto)</option>
+        <option value="latin-serif" ${settings.fontFamily==='latin-serif'?'selected':''}>Serif (Merriweather)</option>
+        <option value="latin-sans" ${settings.fontFamily==='latin-sans'?'selected':''}>Sans (Inter)</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <label>A फॉन्ट साइज़ / Font size A</label>
+      <input type="range" id="font-size" min="0.9" max="2.2" step="0.05" value="${settings.fontSize}">
+    </div>
+    <div class="setting-row">
+      <label>${ICON_BORDER} बॉर्डर / Border (page margin)</label>
+      <input type="range" id="page-margin" min="0.5" max="3" step="0.1" value="${settings.pageMargin}">
+    </div>
+    <div class="setting-row">
+      <label>${ICON_SPACING} स्पेसिंग / Spacing (line height)</label>
+      <input type="range" id="line-height" min="1.3" max="2.6" step="0.05" value="${settings.lineHeight}">
+    </div>
+  `;
+}
+function wireAppearanceControls(container, onRebuildNeeded){
+  container.querySelectorAll('[data-theme]').forEach(b => b.onclick = () => { settings.theme = b.dataset.theme; saveSettings(settings); onRebuildNeeded(); });
+  const cbg = container.querySelector('#custom-bg'); if(cbg) cbg.oninput = () => { settings.customBg = cbg.value; saveSettings(settings); applySettingsToDOM(); };
+  const ctx = container.querySelector('#custom-text'); if(ctx) ctx.oninput = () => { settings.customText = ctx.value; saveSettings(settings); applySettingsToDOM(); };
+  const ff = container.querySelector('#font-family'); if(ff) ff.onchange = (e) => { settings.fontFamily = e.target.value; saveSettings(settings); applySettingsToDOM(); };
+
+  // These three sliders each trigger a full-page reflow (hundreds of verse/
+  // tika blocks reference the CSS vars they control) — rAF-throttle the
+  // actual DOM update so dragging stays responsive instead of visibly
+  // lagging behind the finger while still tracking every input tick.
+  function throttledSlider(id, apply){
+    const el = container.querySelector('#' + id);
+    if(!el) return;
+    let raf = null;
+    el.oninput = (e) => {
+      apply(e.target.value);
+      if(raf) return;
+      raf = requestAnimationFrame(() => { saveSettings(settings); applySettingsToDOM(); raf = null; });
+    };
+  }
+  throttledSlider('font-size', v => settings.fontSize = parseFloat(v));
+  throttledSlider('page-margin', v => settings.pageMargin = parseFloat(v));
+  throttledSlider('line-height', v => settings.lineHeight = parseFloat(v));
+}
+
+/* ---------------- Settings sheet (standalone — home/book/skandh views) ---------------- */
 function openSettingsSheet(){
   const overlay = document.createElement('div');
   overlay.className = 'sheet-overlay';
@@ -383,38 +452,7 @@ function openSettingsSheet(){
     <div class="sheet">
       <button class="close-x">${ICON_CLOSE}</button>
       <h2>${ICON_SETTINGS} रीडिंग सेटिंग्स</h2>
-
-      <div class="setting-row">
-        <label>थीम / Theme</label>
-        <div class="opt-row">
-          ${['light','sepia','dark','custom'].map(t => `<button class="chip ${settings.theme===t?'active':''}" data-theme="${t}">${t}</button>`).join('')}
-        </div>
-        ${settings.theme==='custom' ? `
-          <div class="opt-row" style="margin-top:.6rem">
-            बैकग्राउंड <input type="color" id="custom-bg" value="${settings.customBg}">
-            टेक्स्ट <input type="color" id="custom-text" value="${settings.customText}">
-          </div>`: ''}
-      </div>
-
-      <div class="setting-row">
-        <label>फॉन्ट / Font</label>
-        <select id="font-family">
-          <option value="deva" ${settings.fontFamily==='deva'?'selected':''}>Devanagari (Tiro / Noto)</option>
-          <option value="latin-serif" ${settings.fontFamily==='latin-serif'?'selected':''}>Serif (Merriweather)</option>
-          <option value="latin-sans" ${settings.fontFamily==='latin-sans'?'selected':''}>Sans (Inter)</option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <label>फॉन्ट साइज़ / Font size — ${settings.fontSize.toFixed(2)}rem</label>
-        <input type="range" id="font-size" min="0.9" max="2.2" step="0.05" value="${settings.fontSize}">
-      </div>
-
-      <div class="setting-row">
-        <label>लाइन की चौड़ाई / Words per line — ~${Math.round(settings.lineCh/3)} words</label>
-        <input type="range" id="line-ch" min="16" max="48" step="1" value="${settings.lineCh}">
-      </div>
-
+      ${appearanceControlsHtml()}
       <div class="setting-row">
         <label>भाषाएँ / Languages</label>
         <div class="opt-row">
@@ -423,14 +461,14 @@ function openSettingsSheet(){
       </div>
 
       <div class="setting-row">
-        <label>पेज डिवाइडर / Page dividers (vertical mode)</label>
+        <label>पेज डिवाइडर / Page dividers (scroll mode)</label>
         <div class="opt-row">
           <button class="chip ${settings.pageDividers?'active':''}" id="toggle-dividers">${settings.pageDividers?'चालू / On':'बंद / Off'}</button>
         </div>
       </div>
 
       <div class="setting-row">
-        <label>टीकाएँ / Commentaries — इन्हें दिखाने के लिए "टीका मोड" चुनें (⋮ मेनू से)</label>
+        <label>टीकाएँ / Commentaries — इन्हें दिखाने के लिए "टीका मोड" चुनें</label>
         <div class="tika-list">
           ${TIKA_DEFS.map(t => `
             <label class="tika-row ${t.available?'':'disabled'}">
@@ -446,18 +484,14 @@ function openSettingsSheet(){
   overlay.addEventListener('click', (e) => { if(e.target === overlay) close(); });
   overlay.querySelector('.close-x').onclick = close;
   function close(){ overlay.remove(); refreshReaderIfOpen(); }
+  function rebuild(){ close(); openSettingsSheet(); }
 
-  overlay.querySelectorAll('[data-theme]').forEach(b => b.onclick = () => { settings.theme = b.dataset.theme; saveSettings(settings); close(); openSettingsSheet(); });
-  const cbg = overlay.querySelector('#custom-bg'); if(cbg) cbg.oninput = () => { settings.customBg = cbg.value; saveSettings(settings); applySettingsToDOM(); };
-  const ctx = overlay.querySelector('#custom-text'); if(ctx) ctx.oninput = () => { settings.customText = ctx.value; saveSettings(settings); applySettingsToDOM(); };
-  overlay.querySelector('#font-family').onchange = (e) => { settings.fontFamily = e.target.value; saveSettings(settings); applySettingsToDOM(); };
-  overlay.querySelector('#font-size').oninput = (e) => { settings.fontSize = parseFloat(e.target.value); saveSettings(settings); applySettingsToDOM(); };
-  overlay.querySelector('#line-ch').oninput = (e) => { settings.lineCh = parseInt(e.target.value,10); saveSettings(settings); applySettingsToDOM(); };
+  wireAppearanceControls(overlay, rebuild);
   overlay.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => {
-    const l = b.dataset.lang; settings.langs[l] = !settings.langs[l]; saveSettings(settings); close(); openSettingsSheet();
+    const l = b.dataset.lang; settings.langs[l] = !settings.langs[l]; saveSettings(settings); rebuild();
   });
   const dv = overlay.querySelector('#toggle-dividers');
-  if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); close(); openSettingsSheet(); };
+  if(dv) dv.onclick = () => { settings.pageDividers = !settings.pageDividers; saveSettings(settings); rebuild(); };
   overlay.querySelectorAll('[data-tika]').forEach(cb => cb.onchange = () => {
     settings.tikas[cb.dataset.tika] = cb.checked;
     // Ticking a tika should show it immediately — don't make the user separately
