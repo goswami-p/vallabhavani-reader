@@ -367,11 +367,22 @@ function renderReader(app, book, skandhNum, startChapterKey){
       content.innerHTML = `
         <div class="page-single-wrap" id="pageSingleWrap" style="height:${viewportH}px">
           <div class="page-single" id="pageSingle"></div>
+          <div class="page-end-shadow" id="pageEndShadow"></div>
           <div class="book-tap-zone left" id="tapPrev"></div>
           <div class="book-tap-zone right" id="tapNext"></div>
         </div>`;
       const wrap = document.getElementById('pageSingleWrap');
       const singleEl = document.getElementById('pageSingle');
+      const endShadow = document.getElementById('pageEndShadow');
+
+      // No visible cue otherwise for "you've reached the bottom of this
+      // page's content, swipe now" — darkens once scrolled (or already
+      // short enough to start) at the page's true end.
+      function updateEndShadow(){
+        const atEnd = singleEl.scrollTop + singleEl.clientHeight >= singleEl.scrollHeight - 4;
+        endShadow.classList.toggle('at-end', atEnd);
+      }
+      singleEl.addEventListener('scroll', updateEndShadow, { passive: true });
 
       function renderPage(pi){
         pi = Math.max(0, Math.min(pages.length - 1, pi));
@@ -380,6 +391,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
         singleEl.innerHTML = `<div class="page-content">${pageHtml(pi)}</div>`;
         const fv = firstVerseOfPage(pi);
         if(fv){ setCurrentChapter(fv.chKey); onPositionChange(fv.chKey, fv.vnum); }
+        updateEndShadow();
       }
       document.getElementById('tapPrev').onclick = () => renderPage(currentPage - 1);
       document.getElementById('tapNext').onclick = () => renderPage(currentPage + 1);
@@ -627,6 +639,55 @@ function renderReader(app, book, skandhNum, startChapterKey){
    the same tab instead of jumping back to Contents. ---- */
 function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick, initialTab){
   const tab = initialTab || 'contents';
+
+  function viewPanelHtml(){
+    return `
+      <div class="setting-row">
+        <label>पढ़ने का ढंग / Reading mode</label>
+        <div class="mode-toggle" id="mode-toggle">
+          <button data-mode="scroll" class="${settings.readingMode==='scroll'?'active':''}">${ICON_SCROLL} स्क्रॉल</button>
+          <button data-mode="paginated" class="${settings.readingMode==='paginated'?'active':''}">${ICON_PAGES} पेज</button>
+        </div>
+      </div>
+      <div class="setting-row switch-row">
+        ${settings.readingMode === 'paginated' ? `
+        <label class="vswitch" id="vertScrollSwitch">
+          <input type="checkbox" id="vertScrollToggle" ${settings.paginatedVertical ? 'checked' : ''}>
+          <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
+          <span class="vswitch-label">वर्टिकल स्क्रॉलिंग</span>
+        </label>` : ''}
+        <label class="vswitch" id="pageDividerSwitch">
+          <input type="checkbox" id="pageDividerToggle" ${settings.pageDividers ? 'checked' : ''}>
+          <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
+          <span class="vswitch-label">पेज डिवाइडर</span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <label>कंटेंट मोड / Content mode</label>
+        <div class="mode-tabs">
+          ${CONTENT_MODES.map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${CONTENT_MODE_ICONS[m.key]} ${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>टीकाएँ / Commentaries — टिक करते ही टीका मोड चालू हो जाएगा</label>
+        <div class="tika-list">
+          ${TIKA_DEFS.map(t => `
+            <label class="tika-row ${t.available?'':'disabled'}">
+              <input type="checkbox" data-sheet-tika="${t.key}" ${settings.tikas[t.key]?'checked':''} ${t.available?'':'disabled'}>
+              <span class="t-label">${t.label}</span>
+              <span class="t-sub">${t.sub}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>भाषाएँ / Languages</label>
+        <div class="opt-row">
+          ${['sa','hi','en'].map(l => `<button class="chip ${settings.langs[l]?'active':''}" data-lang="${l}">${({sa:'संस्कृत',hi:'हिन्दी',en:'English'})[l]}</button>`).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   const overlay = document.createElement('div');
   overlay.className = 'sheet-overlay';
   overlay.innerHTML = `
@@ -644,51 +705,7 @@ function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick,
         </div>
       </div>
 
-      <div class="tab-panel" data-panel="view" ${tab==='view'?'':'hidden'}>
-        <div class="setting-row">
-          <label>पढ़ने का ढंग / Reading mode</label>
-          <div class="mode-toggle" id="mode-toggle">
-            <button data-mode="scroll" class="${settings.readingMode==='scroll'?'active':''}">${ICON_SCROLL} स्क्रॉल</button>
-            <button data-mode="paginated" class="${settings.readingMode==='paginated'?'active':''}">${ICON_PAGES} पेज</button>
-          </div>
-        </div>
-        <div class="setting-row switch-row">
-          ${settings.readingMode === 'paginated' ? `
-          <label class="vswitch" id="vertScrollSwitch">
-            <input type="checkbox" id="vertScrollToggle" ${settings.paginatedVertical ? 'checked' : ''}>
-            <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
-            <span class="vswitch-label">वर्टिकल स्क्रॉलिंग</span>
-          </label>` : ''}
-          <label class="vswitch" id="pageDividerSwitch">
-            <input type="checkbox" id="pageDividerToggle" ${settings.pageDividers ? 'checked' : ''}>
-            <span class="vswitch-track"><span class="vswitch-thumb"></span></span>
-            <span class="vswitch-label">पेज डिवाइडर</span>
-          </label>
-        </div>
-        <div class="setting-row">
-          <label>कंटेंट मोड / Content mode</label>
-          <div class="mode-tabs">
-            ${CONTENT_MODES.map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${CONTENT_MODE_ICONS[m.key]} ${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
-          </div>
-        </div>
-        <div class="setting-row">
-          <label>टीकाएँ / Commentaries — टिक करते ही टीका मोड चालू हो जाएगा</label>
-          <div class="tika-list">
-            ${TIKA_DEFS.map(t => `
-              <label class="tika-row ${t.available?'':'disabled'}">
-                <input type="checkbox" data-sheet-tika="${t.key}" ${settings.tikas[t.key]?'checked':''} ${t.available?'':'disabled'}>
-                <span class="t-label">${t.label}</span>
-                <span class="t-sub">${t.sub}</span>
-              </label>`).join('')}
-          </div>
-        </div>
-        <div class="setting-row">
-          <label>भाषाएँ / Languages</label>
-          <div class="opt-row">
-            ${['sa','hi','en'].map(l => `<button class="chip ${settings.langs[l]?'active':''}" data-lang="${l}">${({sa:'संस्कृत',hi:'हिन्दी',en:'English'})[l]}</button>`).join('')}
-          </div>
-        </div>
-      </div>
+      <div class="tab-panel" data-panel="view" ${tab==='view'?'':'hidden'}>${viewPanelHtml()}</div>
 
       <div class="tab-panel" data-panel="settings" ${tab==='settings'?'':'hidden'}>
         ${appearanceControlsHtml()}
@@ -704,37 +721,52 @@ function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick,
     panels.forEach(p => p.hidden = p.dataset.panel !== btn.dataset.tab);
   });
 
+  // The sheet only ever closes on an explicit tap outside it or the X —
+  // never automatically just because a toggle/checkbox/tika/theme changed.
+  // That lets several settings get adjusted in one sitting instead of
+  // reopening the hamburger after every single tap.
   overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
   overlay.querySelector('.close-x').onclick = () => overlay.remove();
   overlay.querySelectorAll('[data-key]').forEach(b => b.onclick = () => { overlay.remove(); onPick(b.dataset.key); });
 
   const reRender = () => { if(window.__vvRenderReader) window.__vvRenderReader(); };
-  const modeToggle = overlay.querySelector('#mode-toggle');
-  if(modeToggle) modeToggle.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
-    settings.readingMode = b.dataset.mode; saveSettings(settings); overlay.remove(); reRender();
-  });
-  const vst = overlay.querySelector('#vertScrollToggle');
-  if(vst) vst.onchange = () => { settings.paginatedVertical = vst.checked; saveSettings(settings); overlay.remove(); reRender(); };
-  overlay.querySelectorAll('[data-sheet-tika]').forEach(cb => cb.onchange = () => {
-    settings.tikas[cb.dataset.sheetTika] = cb.checked;
-    if(cb.checked) settings.contentMode = 'tika';
-    saveSettings(settings); overlay.remove(); reRender();
-  });
-  overlay.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
-    settings.contentMode = b.dataset.m; saveSettings(settings); overlay.remove(); reRender();
-  });
-  overlay.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => {
-    settings.langs[b.dataset.lang] = !settings.langs[b.dataset.lang]; saveSettings(settings); overlay.remove(); reRender();
-  });
-  const dv = overlay.querySelector('#pageDividerToggle');
-  if(dv) dv.onchange = () => { settings.pageDividers = dv.checked; saveSettings(settings); overlay.remove(); reRender(); };
 
-  // Theme changes need the sheet HTML rebuilt (swatch highlight, custom-color
-  // pickers) — reopen on the Settings tab specifically, not back to Contents.
-  wireAppearanceControls(overlay, () => {
-    overlay.remove();
-    openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick, 'settings');
-  });
+  function wireViewPanel(){
+    const panelEl = overlay.querySelector('[data-panel="view"]');
+    const modeToggle = panelEl.querySelector('#mode-toggle');
+    if(modeToggle) modeToggle.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+      settings.readingMode = b.dataset.mode; saveSettings(settings); reRender(); refreshViewPanel();
+    });
+    const vst = panelEl.querySelector('#vertScrollToggle');
+    if(vst) vst.onchange = () => { settings.paginatedVertical = vst.checked; saveSettings(settings); reRender(); };
+    panelEl.querySelectorAll('[data-sheet-tika]').forEach(cb => cb.onchange = () => {
+      settings.tikas[cb.dataset.sheetTika] = cb.checked;
+      if(cb.checked) settings.contentMode = 'tika';
+      saveSettings(settings); reRender(); refreshViewPanel();
+    });
+    panelEl.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
+      settings.contentMode = b.dataset.m; saveSettings(settings); reRender(); refreshViewPanel();
+    });
+    panelEl.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => {
+      settings.langs[b.dataset.lang] = !settings.langs[b.dataset.lang]; saveSettings(settings); reRender(); refreshViewPanel();
+    });
+    const dv = panelEl.querySelector('#pageDividerToggle');
+    if(dv) dv.onchange = () => { settings.pageDividers = dv.checked; saveSettings(settings); reRender(); };
+  }
+  function refreshViewPanel(){
+    overlay.querySelector('[data-panel="view"]').innerHTML = viewPanelHtml();
+    wireViewPanel();
+  }
+  wireViewPanel();
+
+  // Theme/font-family changes need the panel's own HTML refreshed in place
+  // (swatch highlight, custom-color pickers) — never the whole sheet closed.
+  function refreshSettingsPanel(){
+    const panelEl = overlay.querySelector('[data-panel="settings"]');
+    panelEl.innerHTML = appearanceControlsHtml();
+    wireAppearanceControls(panelEl, refreshSettingsPanel);
+  }
+  wireAppearanceControls(overlay.querySelector('[data-panel="settings"]'), refreshSettingsPanel);
 }
 
 /* ---- Find in page: searches mula/hindi/english text across every verse in

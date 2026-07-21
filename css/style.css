@@ -328,6 +328,19 @@ img{ max-width:100%; }
    that one page without it counting as a page turn. */
 .page-single-wrap{ position:relative; overflow:hidden; }
 .page-single{ height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+/* Darkens once scrolled to this page's true end — the only cue that there's
+   nothing left to scroll and it's time to swipe, not just a screen's worth
+   more content below. */
+.page-end-shadow{
+  position:absolute; left:0; right:0; bottom:0; height:36px; z-index:4;
+  background: linear-gradient(180deg, transparent, rgba(20,15,10,.05));
+  opacity:0; transition: opacity .2s ease; pointer-events:none;
+}
+.page-end-shadow.at-end{
+  opacity:1;
+  background: linear-gradient(180deg, transparent, rgba(20,15,10,.22));
+}
+[data-theme="dark"] .page-end-shadow.at-end{ background: linear-gradient(180deg, transparent, rgba(0,0,0,.5)); }
 .book-tap-zone{
   position:absolute; top:0; bottom:0; width:22%; z-index:5;
 }
