@@ -14,13 +14,13 @@ const DEFAULT_SETTINGS = {
   paginatedVertical: false,  // paginated mode only: false = swipe left/right, true = scroll down through page boundaries
   pageDividers: true,
   contentMode: 'default',    // default | tika | flow
-  tikas: { amritaTarangini: false, tattvadipika: false }
+  tikas: { amritaTarangini: false, tattvadipika: false, atHindiVyakhya: false }
 };
 
 const TIKA_DEFS = [
   { key: 'amritaTarangini', label: 'अमृततरङ्गिणी', sub: 'श्रीपुरुषोत्तमकृता', available: true },
   { key: 'tattvadipika', label: 'तत्त्वदीपिका', sub: 'श्रीवल्लभजीमहाराजकृता', available: true },
-  { key: 'atHindiVyakhya', label: 'अमृततरङ्गिणी हिन्दी व्याख्या', sub: 'जल्द आ रहा है', available: false },
+  { key: 'atHindiVyakhya', label: 'अमृततरङ्गिणी हिन्दी व्याख्या', sub: 'हिन्दी अनुवाद', available: true },
   { key: 'hindiVyakhya2', label: 'हिन्दी व्याख्या (2)', sub: 'जल्द आ रहा है', available: false },
   { key: 'gujaratiVyakhya', label: 'गुर्जर-व्याख्या', sub: 'श्रीनानूलाल गांधीकृता · जल्द आ रहा है', available: false }
 ];
