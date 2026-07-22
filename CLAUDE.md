@@ -42,3 +42,29 @@ The centering rule is scoped as `.verse-card .verse-block.lang-sa` specifically
 (not a bare `.verse-block.lang-sa` rule) because `.tika-card` reuses the same
 `verse-block lang-sa` class for its long Sanskrit commentary text, which must
 NOT be centered. Keep that scoping if this CSS is ever touched again.
+
+## Bulk-editing `hi` fields with a script — a trap that already bit once
+
+`speaker: { hi: '...' }` and the verse's own top-level `hi: '...'` are BOTH
+literally the substring `hi: '...'` — a naive regex like `hi:\s*'...'`
+matching per verse-object and taking the first hit will grab `speaker.hi`
+instead of the real field on any verse that has a speaker (in chapter 1:
+verses 1, 2, 21, 24, 28, 47). This actually happened: a bulk-replace script
+wrote the new anuvad into `speaker.hi` (which then rendered, wrongly, in the
+italic uvāca-tag slot) and left the OLD full-tika text sitting untouched in
+the real `hi` field below the shlok — i.e. two different pieces of text
+visibly stacked in the card, looking like a duplicate. `curl`-checking that
+the new text appears *somewhere* in the deployed file is not a real
+verification — it doesn't catch it landing in the wrong field.
+
+**Fix / rule going forward:** anchor on indentation, not just the key name —
+`speaker.hi` is indented one level deeper than the verse's own `hi`. Use
+`^ {14}hi: '` for the speaker field and `^ {12}hi: '` for the real one (or
+whatever the two indent widths are if the file's formatting ever changes —
+check with a quick `grep -nP` before trusting a script). **After any bulk
+data.js edit, programmatically re-read every changed verse back out of the
+file and diff both `speaker.hi` and the top-level `hi` against what was
+intended, for every verse touched — not just one or two spot-checks** — before
+committing/deploying. This is what caught the bug on the second pass (chapter
+1 verses 2-4 were never fully re-verified this way the first time, which is
+why the mistake shipped).
