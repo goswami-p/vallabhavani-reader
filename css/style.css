@@ -220,6 +220,7 @@ img{ max-width:100%; }
 }
 .verse-card .v-speaker{
   font-size:.85rem; color: var(--ink-soft); font-style:italic; margin-bottom:.4rem;
+  text-align:center;
 }
 .verse-block{
   max-width: var(--line-ch);
@@ -228,6 +229,7 @@ img{ max-width:100%; }
   line-height: var(--line-height);
 }
 .verse-block.lang-sa{ font-family: var(--font-deva); color: var(--ink); }
+.verse-card .verse-block.lang-sa{ text-align:center; }
 .verse-block.lang-hi{ font-family: var(--font-deva); color: var(--ink); }
 .verse-block.lang-en{ font-family: var(--font-latin); color: var(--ink-soft); font-size: calc(var(--font-size) * .88); }
 .verse-block p{ margin:0 0 .35rem; white-space: pre-line; overflow-wrap: anywhere; }
