@@ -111,20 +111,49 @@ img{ max-width:100%; }
 .progress-fill{ height:100%; background: var(--orange); width:0%; transition: width .2s; }
 
 /* ---------- Home page ---------- */
+/* Keeps the hero centered AND the sections below it aligned to the same
+   column on wide/desktop windows — without this, .book-grid/.section-title
+   (no width cap of their own) span the full viewport edge-to-edge while the
+   hero stays centered, reading as broken/lopsided above ~700px wide. */
+.home-content{ max-width: 640px; margin: 0 auto; }
 .hero{
-  text-align:center; padding: 2.4rem 1rem 1.6rem;
+  position:relative; text-align:center; padding: 3rem 1.2rem 2rem; overflow:hidden;
 }
-.hero .om{ font-size:2.2rem; }
-.hero h1{
-  font-family: var(--font-deva); font-size:1.9rem; margin:.3rem 0 .2rem;
+/* A slow, quiet "diya" glow behind the Om — the one deliberate bit of motion
+   on the page, sized to match the tagline it sits above (शान्ति से पढ़िए,
+   "read peacefully"). Kept subtle on purpose; respects reduced-motion. */
+.hero-glow{
+  position:absolute; left:50%; top:1.6rem; width:170px; height:170px;
+  transform: translateX(-50%);
+  border-radius:50%; pointer-events:none;
+  background: radial-gradient(circle, var(--orange-2) 0%, transparent 70%);
+  opacity:.3; filter: blur(4px);
+  animation: hero-glow-pulse 6s ease-in-out infinite;
+}
+@keyframes hero-glow-pulse{
+  0%, 100% { opacity:.22; transform: translateX(-50%) scale(.94); }
+  50%      { opacity:.4;  transform: translateX(-50%) scale(1.06); }
+}
+@media (prefers-reduced-motion: reduce){ .hero-glow{ animation:none; opacity:.28; } }
+.hero .om{
+  position:relative; font-family: var(--font-deva); font-size:2.6rem; line-height:1;
   color: var(--orange);
 }
-.hero p{ color: var(--ink-soft); margin:0; }
+.hero .hero-title-sa{
+  position:relative; font-family: var(--font-deva); font-size:2.15rem; font-weight:700;
+  margin:.5rem 0 .05rem; color: var(--orange);
+}
+.hero .hero-title-en{
+  position:relative; font-family: var(--font-latin); font-size:.78rem; font-weight:600;
+  letter-spacing:.16em; text-transform:uppercase;
+  color: var(--ink-soft); margin:0 0 .9rem;
+}
+.hero .hero-tagline{ position:relative; color: var(--ink-soft); margin:0; font-size:.95rem; }
 
 .section-title{
   padding: 0 1.1rem; margin: 1.4rem 0 .6rem;
-  font-size: .95rem; letter-spacing:.03em; text-transform:uppercase;
-  color: var(--ink-soft);
+  font-size: .8rem; letter-spacing:.04em;
+  color: var(--orange); font-weight:700;
 }
 
 .book-grid{
@@ -132,10 +161,20 @@ img{ max-width:100%; }
   gap: 1rem; padding: 0 1rem;
 }
 .book-card{
+  position:relative; overflow:hidden;
   background: var(--card-bg); border:1px solid var(--card-border);
   border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 1.1rem 1rem; display:flex; flex-direction:column; gap:.35rem;
+  padding: 1.2rem 1rem 1.1rem; display:flex; flex-direction:column; gap:.35rem;
   border-top: 4px solid var(--orange);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.book-card:active{ transform: scale(.98); }
+.book-card::after{
+  /* a quiet echo of the hero's Om mark, tucked in the corner — ties each
+     book back to the same mark without repeating the hero's motion */
+  content:'ॐ'; position:absolute; right:-.3rem; bottom:-1rem;
+  font-family: var(--font-deva); font-size:4.5rem; line-height:1;
+  color: var(--orange); opacity:.07; pointer-events:none;
 }
 .book-card .b-title{ font-weight:700; font-size:1.05rem; }
 .book-card .b-sub{ font-size:.82rem; color: var(--ink-soft); }
@@ -584,6 +623,10 @@ input[type=color]{ width:44px; height:34px; border:none; background:none; }
   text-align:center; padding: 2rem 1rem 1rem; font-size:.8rem; color: var(--ink-soft);
 }
 .foot-links a{ margin:0 .5rem; }
+.foot-blessing{
+  font-family: var(--font-deva); font-size:.85rem; color: var(--ink-soft);
+  opacity:.7; letter-spacing:.04em; margin:0 0 1rem;
+}
 
 /* ---------- Find in page ---------- */
 .find-overlay{ align-items:flex-start; }

@@ -348,14 +348,17 @@ function render(){
 function renderHome(app){
   const bookmarks = getBookmarks();
   app.innerHTML = `
-    <div class="topbar"><h1>VallabhaVani</h1>
+    <div class="topbar"><h1>वल्लभवाणी</h1>
       <button class="icon-btn" id="btn-reformat" title="Reformat text">${ICON_WAND}</button>
       <button class="icon-btn" id="btn-settings" title="Settings">${ICON_SETTINGS}</button>
     </div>
+    <div class="home-content">
     <div class="hero">
-      <div class="om">🕉️</div>
-      <h1>VallabhaVani</h1>
-      <p>शान्ति से, अपनी गति से पढ़िए</p>
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="om">ॐ</div>
+      <h1 class="hero-title-sa">वल्लभवाणी</h1>
+      <p class="hero-title-en">VallabhaVani</p>
+      <p class="hero-tagline">शान्ति से, अपनी गति से पढ़िए</p>
     </div>
     ${bookmarks.length ? `
       <div class="section-title">पढ़ना जारी रखें</div>
@@ -376,7 +379,10 @@ function renderHome(app){
         </a>`).join('')}
     </div>
     <div class="foot-links">
+      <p class="foot-blessing">ॐ शान्तिः शान्तिः शान्तिः</p>
       <a href="#/reformat">${ICON_WAND} रीड-मोड बदलें (Reformat)</a>
+    </div>
+    </div>
     </div>
   `;
   app.querySelector('#btn-settings').onclick = () => openSettingsSheet();
