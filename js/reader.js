@@ -60,12 +60,18 @@ function verseCardHtml(v, meta){
   return html;
 }
 
-function wireVerseCardActions(app, verseIndex){
+function wireVerseCardActions(app, verseIndex, bookId){
   app.querySelectorAll('[data-copy-v]').forEach(btn => {
     btn.onclick = () => { const v = verseIndex[btn.dataset.copyV]; if(v) copyText(verseAsText(v, settings.langs)); };
   });
   app.querySelectorAll('[data-share-v]').forEach(btn => {
-    btn.onclick = () => { const v = verseIndex[btn.dataset.shareV]; if(v) shareText(verseAsText(v, settings.langs), 'VallabhaVani'); };
+    btn.onclick = () => {
+      const v = verseIndex[btn.dataset.shareV];
+      if(!v) return;
+      const idx = btn.dataset.shareV.lastIndexOf('-');
+      const chKey = btn.dataset.shareV.slice(0, idx);
+      shareLink(absoluteUrl(hashForVerse(bookId, chKey, v.num)), verseRefLabel(BOOKS[bookId], chKey, v.num), verseAsText(v, settings.langs));
+    };
   });
   app.querySelectorAll('[data-copy-tika]').forEach(btn => {
     btn.onclick = () => {
@@ -273,8 +279,8 @@ function computePages(blocks, containerWidth, containerHeight){
   return pages;
 }
 
-/* ---- Unified reader: a scope (skandh or whole book), optionally starting at one chapter ---- */
-function renderReader(app, book, skandhNum, startChapterKey){
+/* ---- Unified reader: a scope (skandh or whole book), optionally starting at one chapter (and one verse within it) ---- */
+function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
   const allChapters = buildScope(book.id, skandhNum);
   const chapters = allChapters.filter(c => c.data && c.data.verses && c.data.verses.length);
   const scopeLabel = skandhNum ? book.skandhTitles.hi[skandhNum-1] : book.title.hi;
@@ -325,7 +331,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
   };
   app.querySelector('#btn-share-all').onclick = () => {
     const ch = currentChapter();
-    if(ch) shareText(chapterAsText(ch.data.title, ch.data.verses, settings.langs), ch.label);
+    if(ch) shareLink(absoluteUrl(hashForChapter(book.id, ch.key)), ch.label, ch.label);
   };
 
   const root = document.getElementById('reader-root');
@@ -338,6 +344,12 @@ function renderReader(app, book, skandhNum, startChapterKey){
     return;
   }
   titleEl.textContent = currentChapter().label;
+
+  let startVerseIdx = 0;
+  if(startVerseNum != null){
+    const idx = currentChapter().data.verses.findIndex(v => v.num === startVerseNum);
+    if(idx >= 0) startVerseIdx = idx;
+  }
 
   const verseIndex = {};
   chapters.forEach(ch => ch.data.verses.forEach(v => verseIndex[`${ch.key}-${v.num}`] = v));
@@ -550,7 +562,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
       feed.querySelectorAll('.verse-card').forEach(c => io.observe(c));
     }
   }
-  wireVerseCardActions(app, verseIndex);
+  wireVerseCardActions(app, verseIndex, book.id);
 
   /* ---- Whole-book verse index — lets the right-edge scroll pad represent
      position across all of `chapters` (the entire book, for a non-skandh
@@ -604,10 +616,15 @@ function renderReader(app, book, skandhNum, startChapterKey){
     vscrollLabel.textContent = verseRefLabel(book, chKey, (ch && ch.data.verses[idxInCh] || {}).num || '');
   }
   function setScrub(idx, n){ scrubRange.value = idx; positionLabel(idx, n); positionVThumb(currentKey, idx); }
-  function jumpToChapterStart(chKey){
+  function jumpToChapterStart(chKey, behavior){
+    // Default 'auto' (instant, no scroll animation) — explicit chapter
+    // navigation (prev/next-chapter buttons, hamburger chapter list) should
+    // land immediately. Only the "next verse" FAB's fall-through into the
+    // next chapter passes 'smooth' explicitly, to keep that one continuous
+    // with the ordinary in-chapter scroll it's already doing.
     refreshScrubForChapter(chKey);
     setScrub(0, chapters.find(c=>c.key===chKey).data.verses.length);
-    jumpTo(chKey, 0, 'smooth');
+    jumpTo(chKey, 0, behavior || 'auto');
   }
   function onPositionChange(chKey, vnum){
     const ch = chapters.find(c => c.key === chKey);
@@ -621,12 +638,12 @@ function renderReader(app, book, skandhNum, startChapterKey){
   }
 
   refreshScrubForChapter(currentKey);
-  setScrub(0, chapters.find(c=>c.key===currentKey).data.verses.length);
-  jumpTo(currentKey, 0, 'auto'); // ensure initial scroll/page position lands exactly on startKey (needed for book mode's layout-dependent offsets)
+  setScrub(startVerseIdx, chapters.find(c=>c.key===currentKey).data.verses.length);
+  jumpTo(currentKey, startVerseIdx, 'auto'); // ensure initial scroll/page position lands exactly on startKey/startVerseNum (needed for book mode's layout-dependent offsets)
 
   if(nvRef){
-    const firstV = chapters.find(c=>c.key===currentKey).data.verses[0];
-    if(firstV) nvRef.textContent = verseRefLabel(book, currentKey, firstV.num);
+    const startV = chapters.find(c=>c.key===currentKey).data.verses[startVerseIdx];
+    if(startV) nvRef.textContent = verseRefLabel(book, currentKey, startV.num);
   }
   if(nextVerseFab){
     nextVerseFab.onclick = () => {
@@ -635,7 +652,7 @@ function renderReader(app, book, skandhNum, startChapterKey){
       if(idx + 1 < ch.data.verses.length){ jumpTo(currentKey, idx + 1, 'smooth'); }
       else {
         const chIdx = chapters.findIndex(c => c.key === currentKey);
-        if(chIdx >= 0 && chIdx < chapters.length - 1) jumpToChapterStart(chapters[chIdx+1].key);
+        if(chIdx >= 0 && chIdx < chapters.length - 1) jumpToChapterStart(chapters[chIdx+1].key, 'smooth');
       }
     };
   }

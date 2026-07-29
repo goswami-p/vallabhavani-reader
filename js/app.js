@@ -39,7 +39,7 @@ const ICON_EYE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" f
 const ICON_BORDER = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="1.5"/><rect x="6.5" y="6.5" width="7" height="7" rx="1" stroke-dasharray="1.6 1.4"/></svg>`;
 const ICON_SPACING = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="4" x2="17" y2="4"/><line x1="5" y1="10" x2="17" y2="10"/><line x1="5" y1="16" x2="17" y2="16"/><path d="M2 6.2l1.3-1.7 1.3 1.7M2 13.8l1.3 1.7 1.3-1.7"/></svg>`;
 const ICON_COPY = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4.5" width="9.5" height="11.5" rx="1.4"/><path d="M4 7v9a1.4 1.4 0 0 0 1.4 1.4H12"/></svg>`;
-const ICON_SHARE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v9"/><path d="M6.5 6.5L10 3l3.5 3.5"/><path d="M4 11.5V16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-4.5"/></svg>`;
+const ICON_SHARE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="15" cy="4.5" r="2.1" fill="currentColor" stroke="none"/><circle cx="5" cy="10" r="2.1" fill="currentColor" stroke="none"/><circle cx="15" cy="15.5" r="2.1" fill="currentColor" stroke="none"/><line x1="6.8" y1="8.8" x2="13.2" y2="5.6"/><line x1="6.8" y1="11.2" x2="13.2" y2="14.4"/></svg>`;
 const ICON_BOOKMARK = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h9a1 1 0 0 1 1 1V17l-5.5-3.3L4.5 17V4.5a1 1 0 0 1 1-1z"/></svg>`;
 const ICON_CLOSE = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="5" y1="5" x2="15" y2="15"/><line x1="15" y1="5" x2="5" y2="15"/></svg>`;
 const ICON_MENU = `<svg class="icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="3" y1="5.5" x2="17" y2="5.5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="14.5" x2="17" y2="14.5"/></svg>`;
@@ -147,6 +147,28 @@ async function shareText(text, title){
     catch(e){ /* user cancelled or unsupported, fall through */ }
   }
   copyText(text);
+}
+/* Deep-link a single verse or chapter (#/book/:id/adhyay/N or N.V, same for
+   skandh books) and share/copy the actual URL instead of the verse's text. */
+async function shareLink(url, title, text){
+  if(navigator.share){
+    try{ await navigator.share({ title: title || 'VallabhaVani', text, url }); return; }
+    catch(e){ /* user cancelled or unsupported, fall through */ }
+  }
+  copyText(url);
+}
+function hashForChapter(bookId, chKey){
+  const skandhAdhyay = chKey.match(/^s(\d+)a(\d+)$/);
+  if(skandhAdhyay) return `#/book/${bookId}/skandh/${skandhAdhyay[1]}/adhyay/${skandhAdhyay[2]}`;
+  const adhyayOnly = chKey.match(/^a(\d+)$/);
+  if(adhyayOnly) return `#/book/${bookId}/adhyay/${adhyayOnly[1]}`;
+  return `#/book/${bookId}`;
+}
+function hashForVerse(bookId, chKey, verseNum){
+  return `${hashForChapter(bookId, chKey)}.${verseNum}`;
+}
+function absoluteUrl(hash){
+  return `${location.origin}${location.pathname}${hash}`;
 }
 
 /* ---------------- Bookmarks ---------------- */
@@ -274,10 +296,15 @@ function render(){
       const sk = parseInt(parts[3],10);
       if(parts.length === 4) return renderSkandhView(app, book, sk);
       if(parts[4] === 'read') return renderReader(app, book, sk, null);
-      if(parts[4] === 'adhyay') return renderReader(app, book, sk, `s${sk}a${parseInt(parts[5],10)}`);
+      if(parts[4] === 'adhyay'){
+        // parts[5] is "N" (chapter only) or "N.V" (deep link to verse V of chapter N)
+        const [aStr, vStr] = parts[5].split('.');
+        return renderReader(app, book, sk, `s${sk}a${parseInt(aStr,10)}`, vStr ? parseInt(vStr,10) : null);
+      }
     }
     if(!book.hasSkandh && parts[2] === 'adhyay'){
-      return renderReader(app, book, null, `a${parseInt(parts[3],10)}`);
+      const [aStr, vStr] = parts[3].split('.');
+      return renderReader(app, book, null, `a${parseInt(aStr,10)}`, vStr ? parseInt(vStr,10) : null);
     }
   }
   renderHome(app);
