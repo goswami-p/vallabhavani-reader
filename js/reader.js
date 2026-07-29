@@ -70,7 +70,9 @@ function wireVerseCardActions(app, verseIndex, bookId){
       if(!v) return;
       const idx = btn.dataset.shareV.lastIndexOf('-');
       const chKey = btn.dataset.shareV.slice(0, idx);
-      shareLink(absoluteUrl(hashForVerse(bookId, chKey, v.num)), verseRefLabel(BOOKS[bookId], chKey, v.num), verseAsText(v, settings.langs));
+      // Just the link — no verse text — so the share sheet/receiving app
+      // doesn't bury the URL inside a pasted paragraph of shloka text.
+      shareLink(absoluteUrl(hashForVerse(bookId, chKey, v.num)), verseRefLabel(BOOKS[bookId], chKey, v.num));
     };
   });
   app.querySelectorAll('[data-copy-tika]').forEach(btn => {
@@ -331,7 +333,7 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
   };
   app.querySelector('#btn-share-all').onclick = () => {
     const ch = currentChapter();
-    if(ch) shareLink(absoluteUrl(hashForChapter(book.id, ch.key)), ch.label, ch.label);
+    if(ch) shareLink(absoluteUrl(hashForChapter(book.id, ch.key)), ch.label);
   };
 
   const root = document.getElementById('reader-root');
@@ -446,7 +448,12 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
             }
           });
         }, { rootMargin: '0px 0px -75% 0px', threshold: 0 });
-        stack.querySelectorAll('.page-slot').forEach(s => io.observe(s));
+        // Deferred to the next frame: observing immediately would report
+        // whatever page-slot happens to sit at the pre-scroll scrollTop:0
+        // position (this stack holds the WHOLE book) as "current," racing
+        // with — and sometimes overwriting — the deliberate initial jumpTo()
+        // scroll below. By the next frame that scroll has already landed.
+        requestAnimationFrame(() => stack.querySelectorAll('.page-slot').forEach(s => io.observe(s)));
       }
 
     } else {
@@ -527,7 +534,8 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
       const io = new IntersectionObserver((entries) => {
         entries.forEach(e => { if(e.isIntersecting) onPositionChange(e.target.dataset.chkey, parseInt(e.target.dataset.vnum,10)); });
       }, { rootMargin: '0px 0px -75% 0px', threshold: 0 }); // scrollspy-style: "current" = topmost item that has crossed into the top 25% of the viewport. Plain 60%-visible-area threshold falsely flags multiple short verses as simultaneously "current" on tall phone screens.
-      feed.querySelectorAll('.flow-p').forEach(p => io.observe(p));
+      // Deferred to the next frame — see the page-stack observer above for why.
+      requestAnimationFrame(() => feed.querySelectorAll('.flow-p').forEach(p => io.observe(p)));
     }
 
   } else {
@@ -559,9 +567,42 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
           }
         });
       }, { rootMargin: '0px 0px -75% 0px', threshold: 0 }); // scrollspy-style: "current" = topmost item that has crossed into the top 25% of the viewport. Plain 60%-visible-area threshold falsely flags multiple short verses as simultaneously "current" on tall phone screens.
-      feed.querySelectorAll('.verse-card').forEach(c => io.observe(c));
+      // Deferred to the next frame — see the page-stack observer above for why.
+      requestAnimationFrame(() => feed.querySelectorAll('.verse-card').forEach(c => io.observe(c)));
     }
   }
+
+  // In paginated mode, a jumpTo(chKey, verseIdx) call lands on whichever
+  // PAGE contains that verse, and the mode's own position-reporting (the
+  // page-stack/swipe branches' onPositionChange calls, including the
+  // page-stack's async IntersectionObserver — which can fire ~1s+ after the
+  // jump, well after this call has returned) reflects that page's first
+  // verse — not necessarily the verse actually requested (e.g. jumping to
+  // verse 12 can land on a page that starts at verse 8, and the observer
+  // then reports verse 8 as "current"). That's fine for the scrub-bar's
+  // "verse X of N" display, but it must NOT become the anchor a later
+  // in-place refresh (admin overrides loading, a settings change) re-jumps
+  // to — re-jumping via that drifted anchor can land on a page that no
+  // longer contains the originally-requested verse at all, and each
+  // subsequent refresh drifts further (confirmed: a verse-12 deep link
+  // drifted to verse 8, then verse 5, losing verse 12 entirely). Track the
+  // exact requested verse — and its chapter — separately, updated ONLY by
+  // explicit jumpTo calls (chapter nav, scrub drag, deep link, next-verse
+  // fab) — never by the mode's own approximate position-reporting — and use
+  // THOSE as the refresh anchor instead of the scrub-bar's own currentKey
+  // (currentKey is equally at risk: the same async observer report can call
+  // setCurrentChapter() with a neighboring chapter, e.g. landing back on the
+  // tail of chapter 3 instead of chapter 4 — confirmed happening under load
+  // with several tabs/renders in flight).
+  let refreshAnchorChapterKey = startKey, refreshAnchorVerseNum = startVerseNum;
+  const modeJumpTo = jumpTo;
+  jumpTo = (chKey, verseIdx, behavior) => {
+    modeJumpTo(chKey, verseIdx, behavior);
+    const ch = chapters.find(c => c.key === chKey);
+    const v = ch && ch.data.verses[verseIdx];
+    if(v){ refreshAnchorChapterKey = chKey; refreshAnchorVerseNum = v.num; }
+  };
+
   wireVerseCardActions(app, verseIndex, book.id);
 
   /* ---- Whole-book verse index — lets the right-edge scroll pad represent
@@ -725,7 +766,13 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
     vscrollTrack.addEventListener('mousedown', startDrag);
   }
 
-  window.__vvRenderReader = () => renderReader(app, book, skandhNum, currentKey);
+  // Preserve the reader's actual current position (not just the initial deep
+  // link) across in-place refreshes — admin overrides loading in the
+  // background, a settings change, or an admin edit save all call this, and
+  // previously it always re-opened at chapter start (verse index 0),
+  // silently discarding wherever the reader (or a verse deep link) had
+  // actually landed.
+  window.__vvRenderReader = () => renderReader(app, book, skandhNum, refreshAnchorChapterKey, refreshAnchorVerseNum);
 }
 
 /* ---- The hamburger sheet: Contents (chapter list) | View (what & how it's

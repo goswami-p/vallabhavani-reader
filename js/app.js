@@ -263,6 +263,23 @@ window.addEventListener('DOMContentLoaded', () => {
   // once they arrive — the static data.js content shows instantly either way.
   if(window.vvLoadOverrides) vvLoadOverrides((err, count) => { if(!err && count) refreshReaderIfOpen(); });
   window.vvOnAdminStateChange = () => refreshReaderIfOpen();
+  // The Devanagari webfont loads async (display=swap) and isn't actually
+  // requested from the network until the first bit of Devanagari text
+  // paints — i.e. during the render() call just above. Paginated mode's
+  // page boundaries are computed from real character/glyph widths
+  // (computePages() in reader.js); if that measurement runs before the
+  // real font has loaded, it silently uses a fallback font's metrics, and
+  // the exact same chapter re-paginates differently (different page count,
+  // different verse-to-page mapping) the moment anything later triggers an
+  // in-place refresh (admin overrides loading, a settings change) — which
+  // looked like a deep link or reading position randomly jumping to a
+  // different spot. Do exactly one corrective re-layout once the real font
+  // is confirmed loaded, preserving whatever verse is currently shown —
+  // the pagination algorithm itself is untouched, this only guarantees its
+  // inputs are trustworthy at least once per session.
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(() => { if(settings.readingMode === 'paginated') refreshReaderIfOpen(); });
+  }
 });
 
 function route(){
