@@ -33,7 +33,7 @@ function verseCardHtml(v, meta){
   const isAdmin = window.vvIsAdmin && vvIsAdmin();
   let html = `
     <div class="verse-card" data-vkey="${meta.chapterKey}-${v.num}" data-chkey="${meta.chapterKey}">
-      <div class="v-num">${meta.chapterLabel ? meta.chapterLabel + ' · ' : ''}श्लोक ${v.num}</div>
+      ${v.noNum ? '' : `<div class="v-num">${meta.chapterLabel ? meta.chapterLabel + ' · ' : ''}श्लोक ${v.num}</div>`}
       ${blocks.join('')}
       <div class="card-actions">
         <button data-copy-v="${meta.chapterKey}-${v.num}" title="Copy">${ICON_COPY}</button>
@@ -188,11 +188,14 @@ function verseFlowHtml(v, meta){
   const langs = settings.langs;
   const mode = settings.contentMode;
   const parts = [];
-  const vnumTag = `<sup class="flow-vnum">${meta.chapterLabel ? meta.chapterLabel + ' ' : ''}${v.num}</sup>`;
+  // Arbitrary reformatted prose (v.noNum) has no natural "verse number" —
+  // skip the sup-number badge entirely rather than showing a meaningless
+  // श्लोक-style count; a page-number footer covers "where am I" instead.
+  const vnumTag = v.noNum ? '' : `<sup class="flow-vnum">${meta.chapterLabel ? meta.chapterLabel + ' ' : ''}${v.num}</sup>`;
 
   if(mode === 'flow'){
     const txt = (langs.hi && v.hi) || v.hi || (langs.en && v.en) || v.en || '';
-    parts.push(`${vnumTag} ${txt}`);
+    parts.push(vnumTag ? `${vnumTag} ${txt}` : txt);
   } else {
     // uvāca line, then the shlok on its own centered line (pādas separated
     // by <br>, from the \n already in v.sa) — same layout as the card
@@ -204,7 +207,7 @@ function verseFlowHtml(v, meta){
       if(sp) parts.push(`<div class="flow-speaker">${sp}</div>`);
     }
     if(langs.sa && v.sa) parts.push(`<div class="flow-sa">${vnumTag} ${v.sa.replace(/\n/g,'<br>')}</div>`);
-    else parts.push(`<div class="flow-sa">${vnumTag}</div>`);
+    else if(vnumTag) parts.push(`<div class="flow-sa">${vnumTag}</div>`);
     if(langs.hi && v.hi) parts.push(`<span class="flow-hi">${v.hi}</span> `);
     if(langs.en && v.en) parts.push(`<span class="flow-en">${v.en}</span> `);
     if(mode === 'tika' && v.tikas){
@@ -412,6 +415,12 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
     const viewportH = Math.max(200, window.innerHeight - topbarH - scrubH - 16);
     const pages = computePages(blocks, content.clientWidth, PAGINATION_REF.pageHeight);
     pager = { blocks, pages };
+    // Arbitrary reformatted prose has no verse numbers to orient by (see
+    // v.noNum above) — show a plain centered page number at the bottom of
+    // each page instead. Added only to the LIVE page markup, after
+    // computePages() has already decided the boundaries from `blocks`
+    // directly — this can't affect pagination math either way.
+    const showPageNum = chapters.some(c => c.data.verses.some(v => v.noNum));
 
     function pageIndexForVerse(chKey, vnum){
       const bi = blocks.findIndex(b => b.chKey === chKey && b.vnum === vnum);
@@ -420,7 +429,8 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
     }
     function pageHtml(pi){
       const p = pages[pi]; if(!p) return '';
-      return blocks.slice(p.start, p.end).map(b => b.html).join('');
+      const body = blocks.slice(p.start, p.end).map(b => b.html).join('');
+      return showPageNum ? body + `<div class="page-number">${pi + 1}</div>` : body;
     }
     function firstVerseOfPage(pi){
       const p = pages[pi]; if(!p) return null;
@@ -678,6 +688,24 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
     setScrub(0, chapters.find(c=>c.key===chKey).data.verses.length);
     jumpTo(chKey, 0, behavior || 'auto');
   }
+  // Keep the address bar truthful for wherever the reader has actually
+  // scrolled/paged to — so copying the URL bar mid-read (e.g. having opened
+  // 4.12 but read on to 6.7) gives 6.7's link, not the original deep link —
+  // and, as a side effect, fixes the browser back-button: moving between
+  // chapters/verses no longer needs its own history entry (see below), so
+  // "back" always lands on whatever was open before the reader (book grid/
+  // home), not on some other chapter visited along the way.
+  let hashSyncTimer = null;
+  function syncHashToPosition(chKey, vnum){
+    clearTimeout(hashSyncTimer);
+    hashSyncTimer = setTimeout(() => {
+      const newHash = hashForVerse(book.id, chKey, vnum);
+      // replaceState, not pushState/location.hash= — reading forward through
+      // the book should never grow the back-stack; only actually opening the
+      // reader (from a tile, a bookmark, a share link) should be a back-stop.
+      if(location.hash !== newHash) history.replaceState(null, '', newHash);
+    }, 250);
+  }
   function onPositionChange(chKey, vnum){
     const ch = chapters.find(c => c.key === chKey);
     if(!ch) return;
@@ -687,6 +715,7 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
     if(!scrubDragging && vIdx >= 0) setScrub(vIdx, ch.data.verses.length);
     if(nvRef) nvRef.textContent = verseRefLabel(book, chKey, vnum);
     saveScopeBookmark(book, skandhNum, ch, scopeLabel);
+    syncHashToPosition(chKey, vnum);
   }
 
   refreshScrubForChapter(currentKey);

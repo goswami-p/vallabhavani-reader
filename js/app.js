@@ -658,12 +658,19 @@ function renderReformat(app){
     const url = app.querySelector('#rf-url').value.trim();
     const status = app.querySelector('#rf-status');
     let text = app.querySelector('#rf-text').value.trim();
+    let title = null;
     if(url){
       status.textContent = 'लिंक से टेक्स्ट लाया जा रहा है...';
       try{
         const res = await fetch('https://r.jina.ai/' + url);
         if(!res.ok) throw new Error('fetch failed');
-        text = await res.text();
+        const raw = await res.text();
+        // r.jina.ai prefixes the real article with its own metadata block
+        // (Title:, URL Source:, Published Time:, Markdown Content:) — pull
+        // the title out to show as a heading, drop the rest of the preamble.
+        const parsed = parseJinaArticle(raw);
+        title = parsed.title;
+        text = parsed.body;
         status.textContent = 'लिंक से टेक्स्ट सफलतापूर्वक लाया गया।';
       }catch(e){
         status.textContent = 'लिंक से टेक्स्ट नहीं ला सके — कृपया टेक्स्ट सीधे पेस्ट करें। (Could not fetch automatically — please paste the text instead.)';
@@ -679,14 +686,15 @@ function renderReformat(app){
     // building one throwaway "book" with a single chapter, one verse per
     // paragraph. Lives only in this browser's localStorage — never sent to
     // Firestore — so pasting a long article never touches the cloud database.
-    const book = buildReformatBook(paras, url);
+    const book = buildReformatBook(paras, title);
     BOOKS.reformat = book;
     saveReformatBook(book);
     navigate('#/book/reformat/adhyay/1');
   };
 }
-function buildReformatBook(paras, sourceUrl){
-  const title = { hi: sourceUrl ? 'फॉर्मेटेड पाठ' : 'पेस्ट किया गया पाठ', en: 'Formatted text' };
+function buildReformatBook(paras, articleTitle){
+  const title = { hi: articleTitle ? 'फॉर्मेटेड पाठ' : 'पेस्ट किया गया पाठ', en: 'Formatted text' };
+  const bodyParas = articleTitle ? [`**${articleTitle}**`, ...paras] : paras;
   return {
     id: 'reformat',
     title,
@@ -694,11 +702,36 @@ function buildReformatBook(paras, sourceUrl){
     languages: ['hi'],
     hasSkandh: false,
     adhyayCount: 1,
-    // Escaped up front: this text can come from a fetched URL (untrusted
-    // third-party content), and verseCardHtml()/verseFlowHtml() insert `hi`
-    // straight into innerHTML — same escaping the old copy-only version did.
-    adhyays: { '1': { title, verses: paras.map((p, i) => ({ num: i + 1, hi: escapeHtml(p) })) } }
+    adhyays: { '1': { title, verses: bodyParas.map((p, i) => ({
+      num: i + 1,
+      // Escaped first (this text can come from a fetched URL — untrusted
+      // third-party content — and verseCardHtml()/verseFlowHtml() insert
+      // `hi` straight into innerHTML), THEN a minimal markdown pass converts
+      // **bold**/*italic*/# headings into real tags — safe because it only
+      // ever inserts fixed <b>/<i> tags, never re-parses user content as markup.
+      hi: mdBlockToHtml(escapeHtml(p)),
+      // No natural "verse number" for an arbitrary paragraph of prose —
+      // renderers skip the श्लोक N / sup-number badge for these and show a
+      // plain page number instead (see noNum handling in reader.js).
+      noNum: true
+    })) } }
   };
+}
+function parseJinaArticle(raw){
+  const titleMatch = raw.match(/^Title:\s*(.+)$/m);
+  const contentMatch = raw.match(/Markdown Content:\s*\n([\s\S]*)$/);
+  return {
+    title: titleMatch ? titleMatch[1].trim() : null,
+    body: (contentMatch ? contentMatch[1] : raw).trim()
+  };
+}
+function mdBlockToHtml(escaped){
+  const heading = escaped.match(/^#{1,6}\s+(.+)$/);
+  if(heading) return `<b>${mdInline(heading[1])}</b>`;
+  return mdInline(escaped);
+}
+function mdInline(s){
+  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
 }
 function saveReformatBook(book){
   try{ localStorage.setItem('vv_reformat_book', JSON.stringify(book)); }catch(e){ /* storage full/unavailable — book still works for this session */ }
