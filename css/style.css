@@ -18,9 +18,22 @@
   --font-deva:  'Tiro Devanagari Hindi', 'Noto Sans Devanagari', 'Kohinoor Devanagari', sans-serif;
 
   --font-size: 1.15rem;
-  --line-ch: 32ch;      /* fixed reading-column width — auto-scales with font-size via the ch unit itself, not a user setting */
+  /* Reading-column width in portrait — a FIXED root-relative width (rem,
+     never font-size), so it does NOT scale with --font-size. This is what
+     makes shrinking the reading font fit MORE words on the same physical
+     line (PocketBook/Kindle-style reflow) instead of just shrinking the
+     column along with the text. 20.7rem == the pixel width that 32ch used
+     to measure at the reference font-size (1.15rem, Tiro Devanagari) —
+     chosen so the default look is unchanged; only off-default font sizes
+     behave differently (correctly) now. Never express this in `ch` again —
+     `ch` is relative to the element's OWN font-size, which reintroduces the
+     exact bug this fixes (see [[vallabhavani-reader-project]] memory).
+     Landscape uses a separate percentage-margin system — see the
+     `orientation: landscape` media query below. */
+  --line-w: 20.7rem;
   --page-margin: 1.3rem;
   --line-height: 1.95;
+  --landscape-margin-pct: 23;   /* % of viewport width, each side — user-adjustable, landscape only */
 
   --radius: 16px;
   --page-shadow: 0 10px 14px -12px rgba(20,15,10,.45);
@@ -223,7 +236,7 @@ img{ max-width:100%; }
   text-align:center;
 }
 .verse-block{
-  max-width: var(--line-ch);
+  max-width: min(var(--line-w), 100%);
   margin: 0 auto .9rem;
   font-size: var(--font-size);
   line-height: var(--line-height);
@@ -264,7 +277,7 @@ img{ max-width:100%; }
    mode (.flow-feed, tall scrolling column) and paginated mode (.page-content). */
 .flow-feed{ padding: 1rem var(--page-margin) 3rem; max-width: 640px; margin: 0 auto; }
 .flow-p{
-  max-width: var(--line-ch); margin: 0 auto 1.1rem;
+  max-width: min(var(--line-w), 100%); margin: 0 auto 1.1rem;
   font-size: var(--font-size); line-height: var(--line-height);
   font-family: var(--font-deva); color: var(--ink);
   overflow-wrap: anywhere;
@@ -272,8 +285,15 @@ img{ max-width:100%; }
 .flow-vnum{
   font-size: .68rem; color: var(--orange); vertical-align: super; margin-right:.2rem;
 }
-.flow-speaker{ color: var(--ink-soft); font-size: calc(var(--font-size) * .9); }
-.flow-sa{ font-family: var(--font-deva); }
+/* uvāca line, then the shlok on its own centered line below (pādas already
+   separated by <br> from the \n in data.js) — same layout as the card mode's
+   .v-speaker/.verse-block.lang-sa, just inside the flowing (no-card-box)
+   verse block instead. */
+.flow-speaker{
+  display:block; text-align:center; font-style:italic;
+  color: var(--ink-soft); font-size: calc(var(--font-size) * .9); margin-bottom:.3rem;
+}
+.flow-sa{ display:block; text-align:center; font-family: var(--font-deva); margin-bottom:.5rem; }
 .flow-hi{ font-family: var(--font-deva); }
 .flow-en{ font-family: var(--font-latin); color: var(--ink-soft); font-size: calc(var(--font-size) * .88); }
 .flow-tika{ display:block; margin-top:.5rem; padding-top:.5rem; border-top: 1px dashed var(--teal-border); color: var(--ink); }
@@ -281,6 +301,19 @@ img{ max-width:100%; }
 .flow-feed .chapter-break{
   margin-left:0; margin-right:0; text-align:center; font-size:1rem; font-weight:700; color: var(--orange);
   padding: .6rem 0; border-bottom: none;
+}
+
+/* Landscape: the portrait fixed-width reading column (--line-w, tuned for a
+   narrow phone) would look absurdly narrow on a wide rotated screen — filling
+   the full width edge-to-edge would make lines too long to read either.
+   Default to a percentage-of-screen margin instead (--landscape-margin-pct,
+   user-adjustable in Settings), same on both sides. Reading-font-size-driven
+   reflow still applies within that width — this only changes what the width
+   itself is derived from (screen percentage vs. a fixed portrait column). */
+@media (orientation: landscape){
+  .verse-block, .flow-p{
+    max-width: calc(100% - var(--landscape-margin-pct) * 2%);
+  }
 }
 
 /* Content-mode tabs, shown inside the chapter-list (☰) sheet */

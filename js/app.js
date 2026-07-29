@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   fontSize: 1.15,            // rem
   pageMargin: 1.3,           // rem — page/card horizontal padding ("Border" in PocketBook terms)
   lineHeight: 1.95,          // ("Spacing" in PocketBook terms)
+  landscapeMarginPct: 23,    // % of screen width, each side — landscape reading-column margin only
   langs: { sa: true, hi: true, en: false },
   readingMode: 'scroll',     // scroll (infinite) | paginated (fixed page boundaries)
   paginatedVertical: false,  // paginated mode only: false = swipe left/right, true = scroll down through page boundaries
@@ -95,6 +96,7 @@ function applySettingsToDOM(){
   root.style.setProperty('--font-size', settings.fontSize + 'rem');
   root.style.setProperty('--page-margin', settings.pageMargin + 'rem');
   root.style.setProperty('--line-height', settings.lineHeight);
+  root.style.setProperty('--landscape-margin-pct', settings.landscapeMarginPct);
 }
 
 function shade(hex, percent){
@@ -469,6 +471,10 @@ function appearanceControlsHtml(){
       <label>${ICON_SPACING} स्पेसिंग / Spacing (line height)</label>
       <input type="range" id="line-height" min="1.3" max="2.6" step="0.05" value="${settings.lineHeight}">
     </div>
+    <div class="setting-row">
+      <label>${ICON_BORDER} लैंडस्केप मार्जिन / Landscape margin</label>
+      <input type="range" id="landscape-margin" min="10" max="35" step="1" value="${settings.landscapeMarginPct}">
+    </div>
     ${adminLoginHtml()}
   `;
 }
@@ -547,6 +553,7 @@ function wireAppearanceControls(container, onRebuildNeeded){
   throttledSlider('font-size', v => settings.fontSize = parseFloat(v));
   throttledSlider('page-margin', v => settings.pageMargin = parseFloat(v));
   throttledSlider('line-height', v => settings.lineHeight = parseFloat(v));
+  throttledSlider('landscape-margin', v => settings.landscapeMarginPct = parseFloat(v));
 }
 
 /* ---------------- Settings sheet (standalone — home/book/skandh views) ---------------- */

@@ -188,12 +188,17 @@ function verseFlowHtml(v, meta){
     const txt = (langs.hi && v.hi) || v.hi || (langs.en && v.en) || v.en || '';
     parts.push(`${vnumTag} ${txt}`);
   } else {
+    // uvāca line, then the shlok on its own centered line (pādas separated
+    // by <br>, from the \n already in v.sa) — same layout as the card
+    // mode's .v-speaker/.verse-block.lang-sa. .flow-speaker/.flow-sa are
+    // block-level (div, not span/em) so they land on their own line here;
+    // the anuvad below continues as ordinary inline flowing text.
     if(v.speaker){
       const sp = (langs.sa && v.speaker.sa) || (langs.hi && v.speaker.hi) || v.speaker.hi || v.speaker.en;
-      if(sp) parts.push(`<em class="flow-speaker">${sp}</em> `);
+      if(sp) parts.push(`<div class="flow-speaker">${sp}</div>`);
     }
-    if(langs.sa && v.sa) parts.push(`${vnumTag} <span class="flow-sa">${v.sa.replace(/\n/g,' ')}</span> `);
-    else parts.push(vnumTag + ' ');
+    if(langs.sa && v.sa) parts.push(`<div class="flow-sa">${vnumTag} ${v.sa.replace(/\n/g,'<br>')}</div>`);
+    else parts.push(`<div class="flow-sa">${vnumTag}</div>`);
     if(langs.hi && v.hi) parts.push(`<span class="flow-hi">${v.hi}</span> `);
     if(langs.en && v.en) parts.push(`<span class="flow-en">${v.en}</span> `);
     if(mode === 'tika' && v.tikas){
@@ -203,7 +208,7 @@ function verseFlowHtml(v, meta){
       });
     }
   }
-  return `<p class="flow-p" data-chkey="${meta.chapterKey}" data-vnum="${v.num}">${parts.join('')}</p>`;
+  return `<div class="flow-p" data-chkey="${meta.chapterKey}" data-vnum="${v.num}">${parts.join('')}</div>`;
 }
 
 function buildFlowHtml(chapters){
