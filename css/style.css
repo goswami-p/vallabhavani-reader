@@ -315,6 +315,19 @@ img{ max-width:100%; }
     max-width: calc(100% - var(--landscape-margin-pct) * 2%);
   }
 }
+/* A genuinely wide screen (PC/laptop, not just a rotated phone) has a lot
+   more room than the landscape default accounts for — halving the
+   effective margin here still leaves a real margin, just uses more of the
+   available width for actual reading instead of empty space either side. */
+@media (orientation: landscape) and (min-width: 900px){
+  .verse-block, .flow-p{
+    max-width: calc(100% - var(--landscape-margin-pct) * 1%);
+  }
+}
+/* A touch of breathing room between words — barely noticeable at small
+   sizes, more so at large ones (em scales with the element's own font-size,
+   so this grows/shrinks along with --font-size automatically). */
+.verse-block, .flow-p{ word-spacing: 0.05em; }
 
 /* Content-mode tabs, shown inside the chapter-list (☰) sheet */
 .mode-tabs{ display:flex; flex-direction:column; gap:.5rem; }

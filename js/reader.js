@@ -46,10 +46,16 @@ function verseCardHtml(v, meta){
     TIKA_DEFS.filter(t => t.available && settings.tikas[t.key]).forEach(t => {
       const txt = v.tikas[t.key];
       if(!txt) return;
+      // wrapArtifact fields (dense Sanskrit tikas): the embedded \n is just
+      // the source's old fixed-width wrap, not a real break — flow it as a
+      // space so the reading font-size can reflow it naturally, same as the
+      // hi/anuvad field already does. Non-wrapArtifact fields (atHindiVyakhya)
+      // keep their real <br> paragraph breaks untouched.
+      const tikaHtml = t.wrapArtifact ? txt.replace(/\n/g, ' ') : txt.replace(/\n/g, '<br>');
       html += `
         <div class="tika-card" data-vkey="${meta.chapterKey}-${v.num}-${t.key}" data-chkey="${meta.chapterKey}">
           <div class="tika-title">${ICON_TIKA} ${t.label} <span style="font-weight:400;color:var(--ink-soft)">· ${t.sub}</span></div>
-          <div class="verse-block lang-sa"><p>${txt.replace(/\n/g,'<br>')}</p></div>
+          <div class="verse-block lang-sa"><p>${tikaHtml}</p></div>
           <div class="card-actions">
             <button data-copy-tika="${meta.chapterKey}-${v.num}-${t.key}" title="Copy">${ICON_COPY}</button>
             <button data-share-tika="${meta.chapterKey}-${v.num}-${t.key}" title="Share">${ICON_SHARE}</button>

@@ -19,8 +19,13 @@ const DEFAULT_SETTINGS = {
 };
 
 const TIKA_DEFS = [
-  { key: 'amritaTarangini', label: 'अमृततरङ्गिणी', sub: 'श्रीपुरुषोत्तमकृता', available: true },
-  { key: 'tattvadipika', label: 'तत्त्वदीपिका', sub: 'श्रीवल्लभजीमहाराजकृता', available: true },
+  // wrapArtifact: this field's embedded \n are fixed-width line-wrap marks
+  // left over from how the original Sanskrit source was typed/OCR'd — never
+  // a real paragraph break (verified: zero \n\n across ~700 fields each, vs.
+  // atHindiVyakhya/hi which use \n\n deliberately sometimes) — so it should
+  // flow naturally with the reading font-size, not force a <br> on every one.
+  { key: 'amritaTarangini', label: 'अमृततरङ्गिणी', sub: 'श्रीपुरुषोत्तमकृता', available: true, wrapArtifact: true },
+  { key: 'tattvadipika', label: 'तत्त्वदीपिका', sub: 'श्रीवल्लभजीमहाराजकृता', available: true, wrapArtifact: true },
   { key: 'atHindiVyakhya', label: 'अमृततरङ्गिणी हिन्दी व्याख्या', sub: 'हिन्दी अनुवाद', available: true },
   { key: 'hindiVyakhya2', label: 'हिन्दी व्याख्या (2)', sub: 'जल्द आ रहा है', available: false },
   { key: 'gujaratiVyakhya', label: 'गुर्जर-व्याख्या', sub: 'श्रीनानूलाल गांधीकृता · जल्द आ रहा है', available: false }
@@ -207,7 +212,17 @@ function chapterAsText(title, verses, langs){
 }
 
 /* ---------------- Data helpers ---------------- */
-function getBook(id){ return BOOKS[id]; }
+function getBook(id){
+  // The reformat "book" is built at runtime from pasted text/a link — it
+  // lives only in this browser (localStorage), never on the Firestore
+  // backend — so a page reload needs to lazily restore it into BOOKS before
+  // the router can find it, instead of it just vanishing.
+  if(id === 'reformat' && !BOOKS.reformat){
+    const saved = loadReformatBook();
+    if(saved) BOOKS.reformat = saved;
+  }
+  return BOOKS[id];
+}
 
 function getAdhyay(bookId, skandhNum, adhyayNum){
   const book = getBook(bookId);
@@ -353,7 +368,7 @@ function renderHome(app){
       </div>` : ''}
     <div class="section-title">पुस्तकें / Books</div>
     <div class="book-grid">
-      ${Object.values(BOOKS).map(b => `
+      ${Object.values(BOOKS).filter(b => b.id !== 'reformat').map(b => `
         <a class="book-card" href="#/book/${b.id}">
           <span class="b-title">${b.title.hi}</span>
           <span class="b-sub">${b.tagline.hi}</span>
@@ -651,17 +666,38 @@ function renderReformat(app){
     }
     if(!text){ status.textContent = 'कृपया टेक्स्ट या लिंक दें।'; return; }
     const paras = text.split(/\n{2,}|\r?\n/).map(p=>p.trim()).filter(Boolean);
-    const out = app.querySelector('#rf-output');
-    out.innerHTML = `
-      <div class="verse-feed no-dividers" style="padding-left:0;padding-right:0;margin-top:1rem">
-        ${paras.map(p => `
-          <div class="verse-card">
-            <div class="verse-block lang-hi"><p>${escapeHtml(p)}</p></div>
-          </div>`).join('')}
-      </div>
-      <button class="primary-btn" id="rf-copy">${ICON_COPY} पूरा फॉर्मेटेड टेक्स्ट कॉपी करें</button>
-    `;
-    out.querySelector('#rf-copy').onclick = () => copyText(paras.join('\n\n'));
+    if(!paras.length){ status.textContent = 'कोई अनुच्छेद नहीं मिला।'; return; }
+    // Opens in the SAME reader engine as the Gita/Bhagavata (card mode, both
+    // paginated sub-modes, the vertical scroll pad, the bottom scrub-bar —
+    // all of it for free, no separate implementation to keep in sync) by
+    // building one throwaway "book" with a single chapter, one verse per
+    // paragraph. Lives only in this browser's localStorage — never sent to
+    // Firestore — so pasting a long article never touches the cloud database.
+    const book = buildReformatBook(paras, url);
+    BOOKS.reformat = book;
+    saveReformatBook(book);
+    navigate('#/book/reformat/adhyay/1');
   };
+}
+function buildReformatBook(paras, sourceUrl){
+  const title = { hi: sourceUrl ? 'फॉर्मेटेड पाठ' : 'पेस्ट किया गया पाठ', en: 'Formatted text' };
+  return {
+    id: 'reformat',
+    title,
+    tagline: { hi: 'यह पाठ केवल आपके ब्राउज़र में सेव है / saved only in this browser' },
+    languages: ['hi'],
+    hasSkandh: false,
+    adhyayCount: 1,
+    // Escaped up front: this text can come from a fetched URL (untrusted
+    // third-party content), and verseCardHtml()/verseFlowHtml() insert `hi`
+    // straight into innerHTML — same escaping the old copy-only version did.
+    adhyays: { '1': { title, verses: paras.map((p, i) => ({ num: i + 1, hi: escapeHtml(p) })) } }
+  };
+}
+function saveReformatBook(book){
+  try{ localStorage.setItem('vv_reformat_book', JSON.stringify(book)); }catch(e){ /* storage full/unavailable — book still works for this session */ }
+}
+function loadReformatBook(){
+  try{ const raw = localStorage.getItem('vv_reformat_book'); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
 }
 function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
