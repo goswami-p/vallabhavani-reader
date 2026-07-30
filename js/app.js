@@ -9,7 +9,6 @@ const DEFAULT_SETTINGS = {
   fontSize: 1.15,            // rem
   pageMargin: 1.3,           // rem — page/card horizontal padding ("Border" in PocketBook terms)
   lineHeight: 1.95,          // ("Spacing" in PocketBook terms)
-  landscapeMarginPct: 23,    // % of screen width, each side — landscape reading-column margin only
   langs: { sa: true, hi: true, en: false },
   readingMode: 'scroll',     // scroll (infinite) | paginated (fixed page boundaries)
   paginatedVertical: false,  // paginated mode only: false = swipe left/right, true = scroll down through page boundaries
@@ -101,8 +100,53 @@ function applySettingsToDOM(){
   root.style.setProperty('--font-size', settings.fontSize + 'rem');
   root.style.setProperty('--page-margin', settings.pageMargin + 'rem');
   root.style.setProperty('--line-height', settings.lineHeight);
-  root.style.setProperty('--landscape-margin-pct', settings.landscapeMarginPct);
+  const colPx = computeReadingColWidthPx();
+  if(colPx != null) root.style.setProperty('--reading-col-w', colPx + 'px');
+  else root.style.removeProperty('--reading-col-w');
 }
+
+// Keep in sync with the #font-size slider's own min/max below.
+const FONT_SIZE_MIN = 0.9, FONT_SIZE_MAX = 2.2;
+// Reading-column width bounds, in real inches — the standard CSS "1in =
+// 96px" convention (no browser exposes true physical screen DPI, so this is
+// the best available approximation, same one every "in"/"cm" CSS value
+// already relies on). Smaller font size -> WIDER column (more words/line);
+// larger font size -> NARROWER column, down to a floor -- glyph size and
+// column width both push words-per-line the same direction instead of one
+// fighting the other. Only applies on a phone lying flat ("sleeping") or a
+// real PC/laptop (mouse-driven, any orientation) — see the matching CSS media
+// query. Portrait handheld keeps the existing fixed --line-w column: that
+// screen's already narrow, nothing to gain from the extra complexity there.
+const READING_COL_BOUNDS = {
+  pc:             { maxIn: 7.5, minIn: 4   },
+  phoneLandscape: { maxIn: 6.0, minIn: 3.2 }
+};
+function computeReadingColWidthPx(){
+  if(!window.matchMedia) return null;
+  const isPC = window.matchMedia('(pointer: fine)').matches;
+  // Mirror the CSS media query exactly (pointer:coarse, not just "not fine")
+  // — a device that reports neither (pointer:none, rare, or a browser with
+  // no pointer/hover support at all) should fall through to null here too,
+  // same as the CSS query not matching, rather than being misclassified as
+  // a phone.
+  const isPhoneLandscape = window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(orientation: landscape)').matches;
+  const bounds = isPC ? READING_COL_BOUNDS.pc : (isPhoneLandscape ? READING_COL_BOUNDS.phoneLandscape : null);
+  if(!bounds) return null;
+  const t = Math.min(1, Math.max(0, (settings.fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)));
+  const inches = bounds.maxIn - t * (bounds.maxIn - bounds.minIn);
+  return inches * 96;
+}
+// Device class (pointer/orientation) can change after load — a PC window
+// resized narrower, a phone physically rotated — so re-derive the column
+// width then too, not just when a settings slider moves. rAF-throttled so a
+// dragged window edge doesn't recompute on every intermediate resize event.
+let readingColResizeQueued = false;
+window.addEventListener('resize', () => {
+  if(readingColResizeQueued) return;
+  readingColResizeQueued = true;
+  requestAnimationFrame(() => { readingColResizeQueued = false; applySettingsToDOM(); });
+});
+window.addEventListener('orientationchange', () => applySettingsToDOM());
 
 function shade(hex, percent){
   try{
@@ -497,10 +541,6 @@ function appearanceControlsHtml(){
       <label>${ICON_SPACING} स्पेसिंग / Spacing (line height)</label>
       <input type="range" id="line-height" min="1.3" max="2.6" step="0.05" value="${settings.lineHeight}">
     </div>
-    <div class="setting-row">
-      <label>${ICON_BORDER} लैंडस्केप मार्जिन / Landscape margin</label>
-      <input type="range" id="landscape-margin" min="10" max="35" step="1" value="${settings.landscapeMarginPct}">
-    </div>
     ${adminLoginHtml()}
   `;
 }
@@ -579,7 +619,6 @@ function wireAppearanceControls(container, onRebuildNeeded){
   throttledSlider('font-size', v => settings.fontSize = parseFloat(v));
   throttledSlider('page-margin', v => settings.pageMargin = parseFloat(v));
   throttledSlider('line-height', v => settings.lineHeight = parseFloat(v));
-  throttledSlider('landscape-margin', v => settings.landscapeMarginPct = parseFloat(v));
 }
 
 /* ---------------- Settings sheet (standalone — home/book/skandh views) ---------------- */
@@ -722,7 +761,10 @@ function renderReformat(app){
   };
 }
 function buildReformatBook(paras, articleTitle){
-  const title = { hi: articleTitle ? 'फॉर्मेटेड पाठ' : 'पेस्ट किया गया पाठ', en: 'Formatted text' };
+  // No generic "Formatted text"/"Pasted text" placeholder label — the
+  // topbar/bookmark title is the article's own real title when we have one,
+  // or just blank when reading raw pasted text (nothing meaningful to show).
+  const title = { hi: articleTitle || '', en: articleTitle || '' };
   // Escaped first (this text can come from a fetched URL — untrusted
   // third-party content — and verseCardHtml()/verseFlowHtml() insert `hi`
   // straight into innerHTML), THEN a minimal markdown pass converts

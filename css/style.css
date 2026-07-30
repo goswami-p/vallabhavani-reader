@@ -28,12 +28,12 @@
      behave differently (correctly) now. Never express this in `ch` again —
      `ch` is relative to the element's OWN font-size, which reintroduces the
      exact bug this fixes (see [[vallabhavani-reader-project]] memory).
-     Landscape uses a separate percentage-margin system — see the
-     `orientation: landscape` media query below. */
+     A phone lying flat ("landscape") or a real PC/laptop uses a different,
+     JS-computed column (--reading-col-w, set by computeReadingColWidthPx()
+     in app.js) — see the pointer/orientation media query below. */
   --line-w: 20.7rem;
   --page-margin: 1.3rem;
   --line-height: 1.95;
-  --landscape-margin-pct: 23;   /* % of viewport width, each side — user-adjustable, landscape only */
 
   --radius: 16px;
   --page-shadow: 0 10px 14px -12px rgba(20,15,10,.45);
@@ -342,25 +342,20 @@ img{ max-width:100%; }
   padding: .6rem 0; border-bottom: none;
 }
 
-/* Landscape: the portrait fixed-width reading column (--line-w, tuned for a
-   narrow phone) would look absurdly narrow on a wide rotated screen — filling
-   the full width edge-to-edge would make lines too long to read either.
-   Default to a percentage-of-screen margin instead (--landscape-margin-pct,
-   user-adjustable in Settings), same on both sides. Reading-font-size-driven
-   reflow still applies within that width — this only changes what the width
-   itself is derived from (screen percentage vs. a fixed portrait column). */
-@media (orientation: landscape){
+/* Portrait handheld keeps the fixed --line-w column above (default rule) —
+   that screen's already narrow, nothing to gain there. A phone lying flat
+   ("landscape"/"sleeping") or a real PC/laptop (mouse-driven, `pointer:fine`,
+   regardless of its window's orientation) gets --reading-col-w instead: a
+   column whose width is computed in JS (computeReadingColWidthPx() in
+   app.js) as an INVERSE function of the current font-size setting — smaller
+   font = wider column = more words/line, larger font = narrower column
+   (down to a floor) = fewer words/line, so glyph size and column width both
+   push words-per-line the SAME direction instead of one fighting the other
+   (the old flat percentage-of-screen margin didn't know about font-size at
+   all, so a big screen at a big font size still spread lines edge-to-edge). */
+@media (orientation: landscape) and (pointer: coarse), (pointer: fine){
   .verse-block, .flow-p{
-    max-width: calc(100% - var(--landscape-margin-pct) * 2%);
-  }
-}
-/* A genuinely wide screen (PC/laptop, not just a rotated phone) has a lot
-   more room than the landscape default accounts for — halving the
-   effective margin here still leaves a real margin, just uses more of the
-   available width for actual reading instead of empty space either side. */
-@media (orientation: landscape) and (min-width: 900px){
-  .verse-block, .flow-p{
-    max-width: calc(100% - var(--landscape-margin-pct) * 1%);
+    max-width: min(var(--reading-col-w, var(--line-w)), 100%);
   }
 }
 /* A touch of breathing room between words — barely noticeable at small
@@ -398,7 +393,7 @@ img{ max-width:100%; }
   display:block; color: var(--orange); font-size: calc(var(--font-size) * 1.35);
   line-height:1.3; margin-bottom:.3rem;
 }
-.rf-heading{ display:block; color: var(--orange); }
+.rf-heading{ display:block; color: var(--orange); font-size: calc(var(--font-size) + 3pt); }
 .rf-link{ color: var(--orange); text-decoration: underline; text-underline-offset: 2px; }
 .page-content .chapter-break{
   margin-left:0; margin-right:0; text-align:center; font-size:1rem; font-weight:700; color: var(--orange);
