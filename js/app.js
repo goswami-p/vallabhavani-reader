@@ -107,19 +107,26 @@ function applySettingsToDOM(){
 
 // Keep in sync with the #font-size slider's own min/max below.
 const FONT_SIZE_MIN = 0.9, FONT_SIZE_MAX = 2.2;
-// Reading-column width bounds, in real inches — the standard CSS "1in =
-// 96px" convention (no browser exposes true physical screen DPI, so this is
-// the best available approximation, same one every "in"/"cm" CSS value
-// already relies on). Smaller font size -> WIDER column (more words/line);
-// larger font size -> NARROWER column, down to a floor -- glyph size and
-// column width both push words-per-line the same direction instead of one
-// fighting the other. Only applies on a phone lying flat ("sleeping") or a
-// real PC/laptop (mouse-driven, any orientation) — see the matching CSS media
-// query. Portrait handheld keeps the existing fixed --line-w column: that
-// screen's already narrow, nothing to gain from the extra complexity there.
+// Reading-column width bounds. The MAX end (smallest font size) is a
+// PERCENTAGE of the actual viewport width, capped by an absolute ceiling so
+// an ultra-wide monitor doesn't get an unreadably long line — calibrated
+// against a real annotated screenshot (a ~1882px-wide PC window, red lines
+// at columns ~150/~1740, i.e. ~85% of the viewport). The MIN end (largest
+// font size) is a fixed floor in real inches — the standard CSS "1in=96px"
+// convention (no browser exposes true physical screen DPI, so this is the
+// best available approximation) — because that end was an explicit physical
+// constraint ("on a laptop screen, maximum it can shrink is 4 inches"), not
+// a proportion of the screen. Smaller font size -> WIDER column (more
+// words/line); larger font size -> NARROWER column down to that floor —
+// glyph size and column width both push words-per-line the SAME direction
+// instead of one fighting the other. Only applies on a phone lying flat
+// ("sleeping") or a real PC/laptop (mouse-driven, any orientation) — see the
+// matching CSS media query. Portrait handheld keeps the existing fixed
+// --line-w column: that screen's already narrow, nothing to gain from the
+// extra complexity there.
 const READING_COL_BOUNDS = {
-  pc:             { maxIn: 7.5, minIn: 4   },
-  phoneLandscape: { maxIn: 6.0, minIn: 3.2 }
+  pc:             { maxPct: 0.85, maxAbsPx: 1900, minIn: 4   },
+  phoneLandscape: { maxPct: 0.85, maxAbsPx: 900,  minIn: 3.2 }
 };
 function computeReadingColWidthPx(){
   if(!window.matchMedia) return null;
@@ -133,8 +140,9 @@ function computeReadingColWidthPx(){
   const bounds = isPC ? READING_COL_BOUNDS.pc : (isPhoneLandscape ? READING_COL_BOUNDS.phoneLandscape : null);
   if(!bounds) return null;
   const t = Math.min(1, Math.max(0, (settings.fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)));
-  const inches = bounds.maxIn - t * (bounds.maxIn - bounds.minIn);
-  return inches * 96;
+  const maxPx = Math.min(window.innerWidth * bounds.maxPct, bounds.maxAbsPx);
+  const minPx = bounds.minIn * 96;
+  return maxPx - t * (maxPx - minPx);
 }
 // Device class (pointer/orientation) can change after load — a PC window
 // resized narrower, a phone physically rotated — so re-derive the column
@@ -903,9 +911,39 @@ function mdInline(s){
   // them. (A paragraph that's NOTHING but a bare link was already dropped
   // earlier by isBoilerplatePara — this only runs on links sitting inside
   // real surrounding prose.)
-  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+  //
+  // Links are pulled out into placeholders FIRST, before any emphasis
+  // matching — a real URL can contain a literal, unescaped underscore
+  // (e.g. ".../session-126062800181_1.html"; jina escapes SOME literal
+  // underscores as "\_" but not ones sitting inside a URL like this one),
+  // and the emphasis regexes below pair up underscores across the WHOLE
+  // string. Left unprotected, that one stray URL underscore shifts which
+  // underscore pairs with which for the rest of the paragraph, leaving a
+  // later "_word_" only half-converted with one delimiter still visible as
+  // literal text. Placeholders make the URL invisible to that scan; the
+  // underscore/asterisk pair immediately around a placeholder (e.g. real
+  // articles routinely italicize a linked publication name — `_[CNN](url)_`)
+  // still matches correctly since the placeholder token sits right where the
+  // link used to be.
+  const links = [];
+  let out = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+    links.push({ label, url });
+    return `\x01L${links.length - 1}\x01`;
+  });
+  // Underscore emphasis (`_word_`, common for "_The Hindu_ reported...")
+  // needs its own pass — asterisk-only handling left every one of these
+  // with the literal underscores still visible. The `(?<!\\)` guards skip a
+  // backslash-escaped `_`/`*` (unescaped again below) so an intentionally
+  // literal one in running prose isn't mistaken for emphasis.
+  out = out.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/__(.+?)__/g, '<b>$1</b>')
     .replace(/\*(.+?)\*/g, '<i>$1</i>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a class="rf-link" href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    .replace(/(?<!\\)_(.+?)(?<!\\)_/g, '<i>$1</i>')
+    .replace(/\\_/g, '_').replace(/\\\*/g, '*');
+  return out.replace(/\x01L(\d+)\x01/g, (_, i) => {
+    const { label, url } = links[Number(i)];
+    return `<a class="rf-link" href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
 }
 function saveReformatBook(book){
   try{ localStorage.setItem('vv_reformat_book', JSON.stringify(book)); }catch(e){ /* storage full/unavailable — book still works for this session */ }
