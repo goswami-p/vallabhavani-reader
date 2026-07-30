@@ -42,7 +42,7 @@ function verseCardHtml(v, meta){
       ${blocks.join('')}
       <div class="card-actions">
         <button data-copy-v="${meta.chapterKey}-${v.num}" title="Copy">${ICON_COPY}</button>
-        <button data-share-v="${meta.chapterKey}-${v.num}" title="Share">${ICON_SHARE}</button>
+        ${meta.bookId === 'reformat' ? '' : `<button data-share-v="${meta.chapterKey}-${v.num}" title="Share">${ICON_SHARE}</button>`}
         ${isAdmin ? `<button class="edit-btn" data-edit-v="${meta.chapterKey}-${v.num}" data-book-id="${meta.bookId||''}" title="Edit">${ICON_EDIT}</button>` : ''}
       </div>
     </div>`;

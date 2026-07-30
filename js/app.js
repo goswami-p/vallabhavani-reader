@@ -813,6 +813,13 @@ function renderReformat(app){
     const book = buildReformatBook(paras, title);
     BOOKS.reformat = book;
     saveReformatBook(book);
+    // Default a freshly-formatted article to page mode with vertical
+    // scrolling on, per explicit ask — reading mode is a single shared
+    // setting (not per-book), so this does carry over to whatever's read
+    // next too, same as every other appearance setting already does.
+    settings.readingMode = 'paginated';
+    settings.paginatedVertical = true;
+    saveSettings(settings);
     navigate('#/book/reformat/read');
   };
 }
