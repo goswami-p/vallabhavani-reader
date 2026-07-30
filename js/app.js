@@ -97,7 +97,7 @@ function applySettingsToDOM(){
     'latin-sans': "'Inter',system-ui,sans-serif"
   };
   root.style.setProperty('--font-deva', famMap[settings.fontFamily] || famMap.deva);
-  root.style.setProperty('--font-size', settings.fontSize + 'rem');
+  root.style.setProperty('--font-size', fontPxFromSliderT(fontSizeSliderT()) + 'px');
   root.style.setProperty('--page-margin', settings.pageMargin + 'rem');
   root.style.setProperty('--line-height', settings.lineHeight);
   const colPx = computeReadingColWidthPx();
@@ -107,6 +107,43 @@ function applySettingsToDOM(){
 
 // Keep in sync with the #font-size slider's own min/max below.
 const FONT_SIZE_MIN = 0.9, FONT_SIZE_MAX = 2.2;
+// The raw slider value (settings.fontSize, still 0.9-2.2 — unchanged, so
+// nothing else that reads settings.fontSize needs to know this happened)
+// is now just a POSITION (0=min end of travel, 1=max end), shared by both
+// the reading-column-width formula above and the font-size curve below —
+// so the column keeps narrowing smoothly across the WHOLE slider even
+// during a stretch where the actual glyph size isn't changing (see
+// FONT_SIZE_CURVE) — narrowing the column alone already reads as "the text
+// got bigger" without the glyphs themselves needing to grow every step.
+function fontSizeSliderT(){
+  return Math.min(1, Math.max(0, (settings.fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)));
+}
+// Real font size in px, as a hand-tuned piecewise curve over the slider's
+// 0-1 travel — deliberately NOT a straight line. Rishi's own spec: flat at
+// 20px for the whole first half (the column-narrowing above does the "it's
+// getting bigger" work on its own through that stretch), a gentle ramp
+// 20->24px from 50-65%, a steeper ramp 24->28px in just the next 5%, then a
+// final ramp up to 35px at the very end. Anchor points only — plain linear
+// interpolation between each pair, no smoothing, so the ramps stay exactly
+// where specified.
+const FONT_SIZE_CURVE = [
+  { t: 0.00, px: 20 },
+  { t: 0.50, px: 20 },
+  { t: 0.65, px: 24 },
+  { t: 0.70, px: 28 },
+  { t: 1.00, px: 35 }
+];
+function fontPxFromSliderT(t){
+  t = Math.min(1, Math.max(0, t));
+  for(let i = 0; i < FONT_SIZE_CURVE.length - 1; i++){
+    const a = FONT_SIZE_CURVE[i], b = FONT_SIZE_CURVE[i + 1];
+    if(t >= a.t && t <= b.t){
+      const localT = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
+      return a.px + localT * (b.px - a.px);
+    }
+  }
+  return FONT_SIZE_CURVE[FONT_SIZE_CURVE.length - 1].px;
+}
 // Reading-column width bounds. The MAX end (smallest font size) is a
 // PERCENTAGE of the actual viewport width, capped by an absolute ceiling so
 // an ultra-wide monitor doesn't get an unreadably long line — calibrated
@@ -139,7 +176,7 @@ function computeReadingColWidthPx(){
   const isPhoneLandscape = window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(orientation: landscape)').matches;
   const bounds = isPC ? READING_COL_BOUNDS.pc : (isPhoneLandscape ? READING_COL_BOUNDS.phoneLandscape : null);
   if(!bounds) return null;
-  const t = Math.min(1, Math.max(0, (settings.fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)));
+  const t = fontSizeSliderT();
   const maxPx = Math.min(window.innerWidth * bounds.maxPct, bounds.maxAbsPx);
   const minPx = bounds.minIn * 96;
   return maxPx - t * (maxPx - minPx);
