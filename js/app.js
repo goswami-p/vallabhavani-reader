@@ -311,6 +311,11 @@ function render(){
   const app = document.getElementById('app');
   window.scrollTo(0,0);
   window.__vvRenderReader = null;
+  // A reader instance we're navigating away from (back button, or any other
+  // route change) may have a debounced address-bar sync still pending — left
+  // to fire on its own it silently rewrites the URL back to the old reading
+  // position ~250ms later, even though the correct new page is on screen.
+  cancelReaderHashSync();
 
   if(parts.length === 0) return renderHome(app);
   if(parts[0] === 'reformat') return renderReformat(app);
@@ -678,7 +683,31 @@ function renderReformat(app){
       }
     }
     if(!text){ status.textContent = 'कृपया टेक्स्ट या लिंक दें।'; return; }
-    const paras = text.split(/\n{2,}|\r?\n/).map(p=>p.trim()).filter(Boolean);
+    let paras = text.split(/\n{2,}|\r?\n/).map(p=>p.trim()).filter(Boolean).filter(p => !isBoilerplatePara(p));
+    // Some pages (mainly lead-gen/enrollment sites) flatten an entire <select>
+    // dropdown or multi-step form into dozens/hundreds of one-word "paragraphs"
+    // (country names, year lists, form field labels) — no single line looks
+    // like nav/an ad on its own, but a long RUN of very short, unpunctuated
+    // lines back-to-back never happens in real prose. Sweep those runs out.
+    paras = dropFragmentRuns(paras, 6);
+    // Some articles' own first heading just repeats the page title (jina puts
+    // the same string in both the Title: field and as the body's own "# ...")
+    // — drop that echo so the title isn't shown twice in a row.
+    if(title && paras.length){
+      const firstPlain = paras[0].replace(/^#{1,6}\s+/, '').replace(/\*\*/g, '').trim();
+      if(firstPlain.toLowerCase() === title.toLowerCase()) paras.shift();
+    }
+    // Once we hit real site-footer/cookie-consent-banner chrome, everything
+    // after it is guaranteed non-article — cut there rather than trying to
+    // pattern-match every individual footer widget line. Only honored once
+    // some real content has already accumulated, so a false hit near the very
+    // top (rare, but possible) can't wipe out the whole article.
+    let cutAt = -1, charsSoFar = 0;
+    for(let i = 0; i < paras.length; i++){
+      if(isHardStopPara(paras[i]) && charsSoFar > 400){ cutAt = i; break; }
+      charsSoFar += paras[i].length;
+    }
+    if(cutAt !== -1) paras = paras.slice(0, cutAt);
     if(!paras.length){ status.textContent = 'कोई अनुच्छेद नहीं मिला।'; return; }
     // Opens in the SAME reader engine as the Gita/Bhagavata (card mode, both
     // paginated sub-modes, the vertical scroll pad, the bottom scrub-bar —
@@ -694,7 +723,25 @@ function renderReformat(app){
 }
 function buildReformatBook(paras, articleTitle){
   const title = { hi: articleTitle ? 'फॉर्मेटेड पाठ' : 'पेस्ट किया गया पाठ', en: 'Formatted text' };
-  const bodyParas = articleTitle ? [`**${articleTitle}**`, ...paras] : paras;
+  // Escaped first (this text can come from a fetched URL — untrusted
+  // third-party content — and verseCardHtml()/verseFlowHtml() insert `hi`
+  // straight into innerHTML), THEN a minimal markdown pass converts
+  // **bold**/*italic*/# headings into real tags — safe because it only ever
+  // inserts fixed <b>/<i> tags, never re-parses user content as markup.
+  const verses = paras.map((p, i) => ({
+    num: i + 1,
+    hi: mdBlockToHtml(escapeHtml(p)),
+    // No natural "verse number" for an arbitrary paragraph of prose —
+    // renderers skip the श्लोक N / sup-number badge for these and show a
+    // plain page number instead (see noNum handling in reader.js).
+    noNum: true
+  }));
+  if(articleTitle){
+    // Kept in its own tagged span (rf-title, see style.css) instead of being
+    // funneled through mdBlockToHtml's generic heading handling — the page
+    // title should read bigger/bolder than an in-article heading, not the same.
+    verses.unshift({ num: 0, hi: `<b class="rf-title">${mdInline(escapeHtml(articleTitle))}</b>`, noNum: true });
+  }
   return {
     id: 'reformat',
     title,
@@ -702,36 +749,121 @@ function buildReformatBook(paras, articleTitle){
     languages: ['hi'],
     hasSkandh: false,
     adhyayCount: 1,
-    adhyays: { '1': { title, verses: bodyParas.map((p, i) => ({
-      num: i + 1,
-      // Escaped first (this text can come from a fetched URL — untrusted
-      // third-party content — and verseCardHtml()/verseFlowHtml() insert
-      // `hi` straight into innerHTML), THEN a minimal markdown pass converts
-      // **bold**/*italic*/# headings into real tags — safe because it only
-      // ever inserts fixed <b>/<i> tags, never re-parses user content as markup.
-      hi: mdBlockToHtml(escapeHtml(p)),
-      // No natural "verse number" for an arbitrary paragraph of prose —
-      // renderers skip the श्लोक N / sup-number badge for these and show a
-      // plain page number instead (see noNum handling in reader.js).
-      noNum: true
-    })) } }
+    adhyays: { '1': { title, verses } }
   };
 }
 function parseJinaArticle(raw){
   const titleMatch = raw.match(/^Title:\s*(.+)$/m);
   const contentMatch = raw.match(/Markdown Content:\s*\n([\s\S]*)$/);
-  return {
-    title: titleMatch ? titleMatch[1].trim() : null,
-    body: (contentMatch ? contentMatch[1] : raw).trim()
-  };
+  let body = (contentMatch ? contentMatch[1] : raw).trim();
+  // Defensive: if the Markdown Content: marker wasn't found (format drift,
+  // fetch error page, etc.) `body` falls back to the whole raw response —
+  // which starts with the same Title:/URL Source:/Published Time: preamble
+  // already pulled out above. Left in, that preamble becomes its own
+  // paragraph and shows up literally as "Title: ..." in the reader. Strip
+  // any such metadata lines (plus blank lines) ONLY from the very top, so a
+  // real paragraph deeper in the article that happens to start with one of
+  // these words is never touched.
+  const lines = body.split('\n');
+  let i = 0;
+  while(i < lines.length){
+    const line = lines[i].trim();
+    if(line === '' || /^(Title|URL Source|Published Time|Warning|Markdown Content):/i.test(line)){ i++; continue; }
+    break;
+  }
+  body = lines.slice(i).join('\n').trim();
+  return { title: titleMatch ? titleMatch[1].trim() : null, body };
+}
+// r.jina.ai's readability extraction is usually clean, but on pages where it
+// falls back to a raw scrape (404s, JS-only pages, sites its heuristics don't
+// suit) whole nav menus, "sign up"/newsletter/cookie banners, share-this
+// rows and related-article teaser links leak straight into the "paragraphs"
+// (each is its own line after the split in the click handler above). Real
+// prose is never JUST a bare link or one of these UI labels on its own line,
+// so this is high-precision even though it's just a heuristic.
+const BOILERPLATE_WHOLE_RE = /^(menu|search|close|tags?|comments?|related|related articles?|popular topics?|share|share this|share this article|advertisement|sponsored|sponsored content|submit|submit search form|search form|back accept ?&? ?submit|accept ?&? ?submit)$/i;
+const BOILERPLATE_PREFIX_RE = /^(sign up|sign in|log ?in|subscribe|newsletter|we use cookies|accept cookies|cookie (settings|policy|notice)|skip to (main )?content|follow us)/i;
+function isBoilerplatePara(p){
+  const t = p.trim();
+  if(!t) return true;
+  if(/^[-*_\s]{3,}$/.test(t)) return true; // "* * *" / "---" style dividers
+  if(/^\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\.?$/.test(t)) return true; // logo/banner image wrapped in a link
+
+  // Strip a leading bullet/number-list marker, then remove EVERY markdown
+  // link/image construct entirely (not just its label). Real prose that
+  // happens to contain a link always has substantial text left outside the
+  // brackets; a nav item, breadcrumb crumb, or table-of-contents entry has
+  // nothing left over but maybe a stray "/" — no matter how long its own
+  // label text is (a plain word-count check would miss a heading-length nav
+  // label like a breadcrumb's own category name).
+  const noPrefix = t.replace(/^(\*|-|\d{1,3}\.)\s+/, '');
+  const hadLink = /!?\[[^\]]*\]\([^)]+\)/.test(noPrefix);
+  if(hadLink){
+    const remainder = noPrefix.replace(/!?\[[^\]]*\]\([^)]+\)/g, '').replace(/[\s/:.\-–—]+/g, '');
+    if(remainder.length <= 2) return true;
+  }
+  // Breadcrumb crumb with no link at all (the last crumb = current page,
+  // just repeats the title) — short, numbered, no sentence-ending punctuation.
+  if(!hadLink && /^\d{1,2}\.\s+\S/.test(t)){
+    const rest = t.replace(/^\d{1,2}\.\s+/, '').trim();
+    if(!/[.!?]$/.test(rest) && rest.split(/\s+/).length <= 10) return true;
+  }
+  if(BOILERPLATE_WHOLE_RE.test(t)) return true;
+  if(BOILERPLATE_PREFIX_RE.test(t)) return true;
+  return false;
+}
+// A line short enough (<=6 words) and unpunctuated enough (no sentence-ending
+// ./!/?) to plausibly be one flattened <option>/form-field/menu entry rather
+// than a fragment of real prose. One or two of these in a row can easily be
+// genuine (a short aside, a one-word list item) — only a long unbroken RUN of
+// them (see dropFragmentRuns) is treated as non-article content.
+function isFragmentLine(t){
+  const s = t.trim();
+  const words = s.split(/\s+/).filter(Boolean);
+  if(words.length > 6) return false;
+  if(/[.!?]$/.test(s)) return false;
+  return true;
+}
+function dropFragmentRuns(paras, runThreshold){
+  const out = [];
+  let i = 0;
+  while(i < paras.length){
+    if(isFragmentLine(paras[i])){
+      let j = i;
+      while(j < paras.length && isFragmentLine(paras[j])) j++;
+      if((j - i) < runThreshold){ for(let k = i; k < j; k++) out.push(paras[k]); }
+      i = j;
+    }else{ out.push(paras[i]); i++; }
+  }
+  return out;
+}
+// Cookie-consent banners, share-widget rows, and related-article grids use
+// near-identical boilerplate phrasing across most of the web (OneTrust-style
+// consent centers especially) — once one of these shows up, the rest of the
+// dump to the end of the page is guaranteed to be footer chrome, not article.
+const HARD_STOP_RE = /^(share this( story| article)?|related articles?( in)?|related resources?|unlock your potential|manage (cookies? settings|consent preferences)|privacy\s*\/?\s*cookie disclaimer|do not sell my personal information|strictly necessary cookies|performance cookies|targeting cookies|social media cookies|cookie list|confirm my choices|sale of personal data)$/i;
+function isHardStopPara(t){
+  if(HARD_STOP_RE.test(t)) return true;
+  if(/all rights reserved/i.test(t)) return true;
+  if(/^©\s*\d{4}/.test(t)) return true;
+  return false;
 }
 function mdBlockToHtml(escaped){
   const heading = escaped.match(/^#{1,6}\s+(.+)$/);
-  if(heading) return `<b>${mdInline(heading[1])}</b>`;
+  if(heading) return `<b class="rf-heading">${mdInline(heading[1])}</b>`;
   return mdInline(escaped);
 }
 function mdInline(s){
-  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+  // Inline citation/source links (e.g. "According to [a 2023 study](url)...")
+  // are common in real articles — left as raw markdown they'd show the whole
+  // URL as ugly literal text in the middle of a sentence. Real, clickable
+  // link, just the label visible, matching how any reader-mode view treats
+  // them. (A paragraph that's NOTHING but a bare link was already dropped
+  // earlier by isBoilerplatePara — this only runs on links sitting inside
+  // real surrounding prose.)
+  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.+?)\*/g, '<i>$1</i>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a class="rf-link" href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 function saveReformatBook(book){
   try{ localStorage.setItem('vv_reformat_book', JSON.stringify(book)); }catch(e){ /* storage full/unavailable — book still works for this session */ }

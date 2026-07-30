@@ -18,6 +18,11 @@ const CONTENT_MODES = [
 
 const CONTENT_MODE_ICONS = { default: '', tika: ICON_TIKA, flow: ICON_FLOW };
 
+// Shared by renderReader()'s syncHashToPosition — see the comment there for
+// why this must live at module scope instead of being local to one call.
+let hashSyncTimer = null;
+function cancelReaderHashSync(){ clearTimeout(hashSyncTimer); hashSyncTimer = null; }
+
 /* ---------------- Card rendering (vertical + default/tika) ---------------- */
 function verseCardHtml(v, meta){
   const langs = settings.langs;
@@ -320,7 +325,11 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
   `;
 
   const titleEl = app.querySelector('#reader-title');
-  app.querySelector('#btn-back').onclick = () => navigate(backHref);
+  // Must pop the real history stack (like the grid views' back button does),
+  // NOT push a fresh forward entry — pushing here while the grid view's own
+  // back button pops meant the two ping-ponged forever instead of ever
+  // reaching the page before the grid (see CLAUDE.md-adjacent lessons doc).
+  app.querySelector('#btn-back').onclick = () => history.length > 1 ? history.back() : navigate(backHref);
   app.querySelector('#btn-search').onclick = () => openFindInPage(app, book, chapters, (chKey, vnum) => {
     const idx = chapters.find(c => c.key === chKey).data.verses.findIndex(v => v.num === vnum);
     if(idx >= 0) jumpTo(chKey, idx, 'smooth');
@@ -695,7 +704,16 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
   // chapters/verses no longer needs its own history entry (see below), so
   // "back" always lands on whatever was open before the reader (book grid/
   // home), not on some other chapter visited along the way.
-  let hashSyncTimer = null;
+  //
+  // hashSyncTimer itself lives at module scope (see cancelReaderHashSync
+  // below), NOT as a local here — a scrollspy callback already in flight when
+  // the user navigates away keeps running (leaving the reader doesn't cancel
+  // it), and a local variable re-declared on every renderReader() call can't
+  // reach back to cancel a timer scheduled by a previous call. Without a
+  // shared handle, that stale timer fires ~250ms after the user has already
+  // left, silently replaceState-ing the address bar back to the old reading
+  // position even though the correct page is on screen — render() cancels it
+  // on every navigation (see app.js) to close that gap.
   function syncHashToPosition(chKey, vnum){
     clearTimeout(hashSyncTimer);
     hashSyncTimer = setTimeout(() => {
