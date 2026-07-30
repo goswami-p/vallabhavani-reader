@@ -254,6 +254,12 @@ async function shareLink(url, title, text){
   copyText(url);
 }
 function hashForChapter(bookId, chKey){
+  // Reformat only ever has exactly one "chapter" — spelling out "adhyay/1"
+  // in every copied/shared link is meaningless clutter (it never varies),
+  // unlike a real book where the chapter number is the whole point. The
+  // existing whole-book "/read" route already starts on the first (only)
+  // chapter with no number in the path at all.
+  if(bookId === 'reformat') return `#/book/${bookId}/read`;
   const skandhAdhyay = chKey.match(/^s(\d+)a(\d+)$/);
   if(skandhAdhyay) return `#/book/${bookId}/skandh/${skandhAdhyay[1]}/adhyay/${skandhAdhyay[2]}`;
   const adhyayOnly = chKey.match(/^a(\d+)$/);
@@ -351,7 +357,7 @@ function buildScope(bookId, skandhNum /* optional */){
       chapters.push({
         key: `a${a}`,
         label: adhyay ? (adhyay.title.hi || adhyay.title.en) : `अध्याय ${a}`,
-        href: `#/book/${bookId}/adhyay/${a}`,
+        href: hashForChapter(bookId, `a${a}`),
         data: adhyay
       });
     }
@@ -417,8 +423,13 @@ function render(){
     // #/book/:id
     if(parts.length === 2) return renderBookView(app, book);
 
-    // #/book/:id/read  -> whole-book continuous/paged reader
-    if(parts[2] === 'read') return renderReader(app, book, null, null);
+    // #/book/:id/read  -> whole-book continuous/paged reader, optionally
+    // #/book/:id/read.V to deep-link a verse within it (no chapter number in
+    // the path — used for reformat, which only ever has one chapter).
+    if(parts[2] === 'read' || (parts[2] && parts[2].indexOf('read.') === 0)){
+      const vStr = parts[2].split('.')[1];
+      return renderReader(app, book, null, null, vStr ? parseInt(vStr,10) : null);
+    }
 
     if(book.hasSkandh && parts[2] === 'skandh'){
       const sk = parseInt(parts[3],10);
@@ -802,7 +813,7 @@ function renderReformat(app){
     const book = buildReformatBook(paras, title);
     BOOKS.reformat = book;
     saveReformatBook(book);
-    navigate('#/book/reformat/adhyay/1');
+    navigate('#/book/reformat/read');
   };
 }
 function buildReformatBook(paras, articleTitle){
@@ -868,8 +879,8 @@ function parseJinaArticle(raw){
 // (each is its own line after the split in the click handler above). Real
 // prose is never JUST a bare link or one of these UI labels on its own line,
 // so this is high-precision even though it's just a heuristic.
-const BOILERPLATE_WHOLE_RE = /^(menu|search|close|tags?|comments?|related|related articles?|popular topics?|share|share this|share this article|advertisement|sponsored|sponsored content|submit|submit search form|search form|back accept ?&? ?submit|accept ?&? ?submit)$/i;
-const BOILERPLATE_PREFIX_RE = /^(sign up|sign in|log ?in|subscribe|newsletter|we use cookies|accept cookies|cookie (settings|policy|notice)|skip to (main )?content|follow us)/i;
+const BOILERPLATE_WHOLE_RE = /^(menu|search|close|tags?|comments?|related|related articles?|popular topics?|share|share this|share this article|advertisement|sponsored|sponsored content|submit|submit search form|search form|back accept ?&? ?submit|accept ?&? ?submit|enter your email|email address)$/i;
+const BOILERPLATE_PREFIX_RE = /^(sign up|sign in|log ?in|subscribe|newsletter|we use cookies|accept cookies|cookie (settings|policy|notice)|skip to (main )?content|follow us|remember me|join medium|get .+('s|’s) stories in your inbox)/i;
 function isBoilerplatePara(p){
   const t = p.trim();
   if(!t) return true;

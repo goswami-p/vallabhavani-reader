@@ -841,6 +841,12 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
 function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick, initialTab){
   const tab = initialTab || 'contents';
 
+  // Reformat's throwaway single-chapter "book" has no tikas field on any of
+  // its verses at all — the commentaries checklist (and picking "tika mode"
+  // itself, which would just be a dead-end tab with nothing to tick) is
+  // meaningless clutter here, unlike a real scripture book. Scoped strictly
+  // to book.id === 'reformat' so Gita/Bhagavata are completely untouched.
+  const isReformat = book.id === 'reformat';
   function viewPanelHtml(){
     return `
       <div class="setting-row">
@@ -866,9 +872,10 @@ function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick,
       <div class="setting-row">
         <label>कंटेंट मोड / Content mode</label>
         <div class="mode-tabs">
-          ${CONTENT_MODES.map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${CONTENT_MODE_ICONS[m.key]} ${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
+          ${CONTENT_MODES.filter(m => !isReformat || m.key !== 'tika').map(m => `<button class="mode-tab ${settings.contentMode===m.key?'active':''}" data-m="${m.key}">${CONTENT_MODE_ICONS[m.key]} ${m.label}<span class="m-sub">${m.sub}</span></button>`).join('')}
         </div>
       </div>
+      ${isReformat ? '' : `
       <div class="setting-row">
         <label>टीकाएँ / Commentaries — टिक करते ही टीका मोड चालू हो जाएगा</label>
         <div class="tika-list">
@@ -879,7 +886,7 @@ function openReaderMenuSheet(app, book, skandhNum, chapters, currentKey, onPick,
               <span class="t-sub">${t.sub}</span>
             </label>`).join('')}
         </div>
-      </div>
+      </div>`}
       <div class="setting-row">
         <label>भाषाएँ / Languages</label>
         <div class="opt-row">
