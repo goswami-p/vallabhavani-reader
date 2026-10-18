@@ -422,7 +422,11 @@ const VVListen = (() => {
     utt.onerror = (e) => {
       if(myRun !== state.runId) return;
       // cancel()/pause()-triggered noise — the stop/restart path owns it.
-      if(e && (e.error === 'interrupted' || e.error === 'canceled')) return;
+      if(e && (e.error === 'interrupted' || e.error === 'canceled')) {
+        console.log('TTS Debug: Speech interrupted/cancelled');
+        return;
+      }
+      console.log('TTS Debug: Speech error:', e && e.error, e && e.message);
       advanceChunk();                                  // real error: skip this chunk, keep going
     };
     state.wordPos = a;
@@ -433,6 +437,8 @@ const VVListen = (() => {
     state.chunkStart = a;
     state.chunkLen = s.b - a;                          // timed estimate uses the spoken slice length
     updateWord(u, a);
+    console.log('TTS Debug: Speaking chunk', state.sentIdx, 'of', u.sents.length, '- text:', text.substring(0, 50) + '...');
+    console.log('TTS Debug: Voice:', v ? v.name + ' (' + v.lang + ')' : 'none', 'Rate:', state.rate);
     synth.speak(utt);
     startRaf(rid);
     updatePanel();
@@ -474,6 +480,7 @@ const VVListen = (() => {
   function play(fromUnit, fromSent){
     if(!supported) {
       toast('Web Speech API not supported in this browser');
+      console.log('TTS Debug: supported=false');
       return;
     }
     if(!state.units.length) {
@@ -482,14 +489,23 @@ const VVListen = (() => {
     }
     // Check for available voices
     if(!state.voices || state.voices.length === 0) {
-      toast('No voice available. Please wait for voices to load...');
+      toast('Loading voices... (check browser settings)');
+      console.log('TTS Debug: No voices loaded yet, reloading...');
       // Try to reload voices
       loadVoices();
+      // Schedule another load attempt
+      setTimeout(loadVoices, 1000);
+      setTimeout(loadVoices, 3000);
       return;
     }
     const picked = pickVoice();
+    console.log('TTS Debug: Voices count:', state.voices.length);
+    console.log('TTS Debug: Picked voice:', picked ? picked.name + ' (' + picked.lang + ')' : 'none');
     if(!picked) {
-      toast('No suitable voice found. Available voices: ' + state.voices.length);
+      toast('No suitable voice. Available: ' + state.voices.length + ' voices');
+      // Log all available voices for debugging
+      const voiceList = state.voices.map(v => v.name + ' (' + v.lang + ')').join(', ');
+      console.log('TTS Debug: All voices:', voiceList);
       return;
     }
     const rid = ++state.runId;
