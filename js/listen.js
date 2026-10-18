@@ -416,6 +416,8 @@ const VVListen = (() => {
     const v = pickVoice();
     if(v){ utt.voice = v; utt.lang = v.lang; }
     utt.rate = state.rate;
+    utt.volume = 1.0;  // Explicitly set volume to max
+    utt.pitch = 1.0;   // Normal pitch
     const myRun = rid, myU = state.unitIdx, myS = state.sentIdx;
     utt.onboundary = (e) => {
       if(myRun !== state.runId || myU !== state.unitIdx || myS !== state.sentIdx) return;
@@ -446,7 +448,10 @@ const VVListen = (() => {
     updateWord(u, a);
     console.log('TTS Debug: Speaking chunk', state.sentIdx, 'of', u.sents.length, '- text:', text.substring(0, 50) + '...');
     console.log('TTS Debug: Voice:', v ? v.name + ' (' + v.lang + ')' : 'none', 'Rate:', state.rate);
+    // Mobile Chrome: explicitly resume synthesis before speaking
+    if(synth.paused) synth.resume();
     synth.speak(utt);
+    console.log('TTS Debug: synth.speaking:', synth.speaking, 'synth.pending:', synth.pending);
     startRaf(rid);
     updatePanel();
   }
@@ -494,6 +499,10 @@ const VVListen = (() => {
       toast('No content to read');
       return;
     }
+    
+    // Mobile fix: Cancel any pending utterances first
+    synth.cancel();
+    
     // Check for available voices - mobile Chrome needs user interaction first
     if(!state.voices || state.voices.length === 0) {
       // Force reload voices on user interaction (required for mobile)
@@ -518,6 +527,7 @@ const VVListen = (() => {
     const picked = pickVoice();
     console.log('TTS Debug: Voices count:', state.voices.length);
     console.log('TTS Debug: Picked voice:', picked ? picked.name + ' (' + picked.lang + ')' : 'none');
+    console.log('TTS Debug: synth.paused:', synth.paused, 'synth.speaking:', synth.speaking);
     if(!picked) {
       toast('No suitable voice. Available: ' + state.voices.length + ' voices');
       const voiceList = state.voices.map(v => v.name + ' (' + v.lang + ')').join(', ');
@@ -526,7 +536,6 @@ const VVListen = (() => {
     }
     const rid = ++state.runId;
     stopRaf();
-    synth.cancel();
     if(fromUnit != null){ state.unitIdx = fromUnit; state.sentIdx = fromSent || 0; }
     state.wordPos = null;
     state.chunkOverride = null; state.chunkLen = 0;
