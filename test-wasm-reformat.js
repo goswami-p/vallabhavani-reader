@@ -1,0 +1,77 @@
+// Wasm (Piper) engine smoke test — reformat English passage, engine forced to wasm.
+const { chromium } = require('playwright');
+
+(async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: false });
+  const page = await browser.newPage();
+  const logs = [];
+  page.on('console', m => logs.push(m.text()));
+  page.on('pageerror', e => logs.push('PAGEERROR: ' + e.message));
+  page.on('dialog', d => d.accept().catch(() => {}));   // auto-accept the download confirm
+
+  await page.goto('http://127.0.0.1:8765/#/reformat', { waitUntil: 'load' });
+  await page.evaluate(() => localStorage.setItem('vv_listen_engine', 'wasm'));
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#rf-text', { timeout: 10000 });
+
+  const passage = [
+    'The Last Lighthouse Keeper',
+    '',
+    'For thirty years, Elara tended the lamp at Cape Morwen without complaint. The sea gave her nothing but grey mornings and colder nights, and still she climbed the spiral stairs at dusk, wick trimmed, oil measured, glass polished until it caught the moon.',
+    '',
+    'The villagers said the light was for ships. Elara knew better. It was for the ones who had already drowned, the ones who still needed to know that someone, somewhere, was awake and watching the water.'
+  ].join('\n');
+  await page.fill('#rf-text', passage);
+  await page.click('#rf-go');
+  await page.waitForSelector('.verse-card, .flow-p', { timeout: 15000 });
+  console.log('PASS — reformat reader opened');
+
+  await page.click('#btn-listen');
+  await page.waitForSelector('.listen-panel', { timeout: 5000 });
+  console.log('PASS — panel opens');
+
+  const eng = await page.$eval('#lp-engine', el => el.value);
+  console.log('PASS — engine select pref =', eng);
+
+  await page.click('#lp-play');
+
+  // wait up to 180s: 60MB voice download + compile + first synth
+  let ok = false, snap = null;
+  for (let i = 0; i < 90; i++) {
+    await page.waitForTimeout(2000);
+    snap = await page.evaluate(() => ({
+      engine: VVListen._state.engine,
+      status: VVListen._state.status,
+      ready: [...VVListen._state.ttsReady],
+      hasSrc: !!VVListen._state.curSrc,
+      wordTimes: VVListen._state.wordTimes ? VVListen._state.wordTimes.length : 0,
+      unitIdx: VVListen._state.unitIdx,
+      sentIdx: VVListen._state.sentIdx
+    }));
+    const wasmLog = logs.find(l => /TTS wasm \[/.test(l));
+    if (snap.engine === 'wasm' && snap.status === 'playing' && (snap.hasSrc || wasmLog)) { ok = true; break; }
+    if (snap.status === 'idle' && snap.unitIdx === 0 && i > 10) break;  // bailed to native/finished
+    if (i % 5 === 0) console.log('... ' + (i * 2) + 's', JSON.stringify(snap));
+  }
+  console.log(ok ? 'PASS — wasm engine playing' : 'FAIL — wasm not playing', JSON.stringify(snap));
+  const wasmLines = logs.filter(l => /TTS wasm/.test(l)).slice(0, 6);
+  wasmLines.forEach(l => console.log('LOG:', l));
+  const errLines = logs.filter(l => /error|Error|FAIL|phonemizer/i.test(l)).slice(0, 8);
+  errLines.forEach(l => console.log('ERRLOG:', l));
+
+  // pause/resume quick check on wasm
+  if (ok) {
+    await page.click('#lp-play');  // pause
+    await page.waitForTimeout(400);
+    const paused = await page.evaluate(() => VVListen._state.status);
+    console.log(paused === 'paused' ? 'PASS — wasm pause' : 'FAIL — wasm pause [' + paused + ']');
+    await page.click('#lp-play');  // resume
+    await page.waitForTimeout(600);
+    const resumed = await page.evaluate(() => ({ s: VVListen._state.status, src: !!VVListen._state.curSrc }));
+    console.log(resumed.s === 'playing' ? 'PASS — wasm resume' : 'FAIL — wasm resume [' + JSON.stringify(resumed) + ']');
+    await page.keyboard.press('Escape');
+  }
+
+  await browser.close();
+  process.exit(ok ? 0 : 1);
+})().catch(e => { console.error('FATAL', e); process.exit(1); });

@@ -71,11 +71,17 @@ why the mistake shipped).
 
 ## Listen (read-aloud) — `js/listen.js`
 
-Reusable engine + player panel (`window.VVListen`) using the Web Speech API —
-no server/API key. Wired from the reader topbar (`#btn-listen` in
-`renderReader`, reader.js) and detached on every route change (`render()` in
-app.js, `renderReader` itself, and listen.js's own `hashchange`/`pagehide`
-handlers — keep all three). Script tag goes AFTER reader.js in index.html.
+Reusable engine + player panel (`window.VVListen`) with TWO backends:
+**native** (Web Speech API) and **wasm** (offline Piper TTS in a worker —
+`tts/tts-worker.js` + `tts/tts-engine.js`, models under `/tts/`). Engine pick:
+`auto` (Android → wasm, desktop → native), `wasm`, or `native`, persisted in
+`vv_listen_engine`. Silent-native detector (`suspectNative`, two strikes of
+onend-without-onstart / <150 ms completes) auto-switches auto mode to wasm;
+an explicit native pick is never overridden. Wired from the reader topbar
+(`#btn-listen` in `renderReader`, reader.js) and detached on every route
+change (`render()` in app.js, `renderReader` itself, and listen.js's own
+`hashchange`/`pagehide` handlers — keep all three). Script tag goes AFTER
+reader.js in index.html.
 
 Key invariants if this code is touched:
 
@@ -96,25 +102,55 @@ Key invariants if this code is touched:
   queue is genuinely `speaking/pending`. Pause = cancel, resume = re-speak the
   current chunk from `currentChunkStartWord()` via `chunkOverride` — don't try
   `synth.pause()/resume()` on long utterances.
-- **Voice pick must match the text's script:** `pickVoice()` prefers a `hi-*`
-  voice (Android's English engine given Devanagari text completes silently —
-  onstart/onend fire instantly, zero audio, while the rAF highlighter keeps
+- **Native: voice pick must match the text's script:** `pickVoice(text)` is
+  script-aware (Devanagari → `hi-*` first, Latin → Natural/online/English)
+  — Android's English engine given Devanagari text completes silently
+  (onstart/onend fire instantly, zero audio, while the rAF highlighter keeps
   moving). Desktop Edge has no Hindi voice, falls back to its English voice
-  (which does vocalize Devanagari) — the PC path stays as it was. Never force
-  `utt.lang = 'hi-IN'` when a voice is available; assign `utt.voice` +
-  `utt.lang` from `pickVoice()`.
+  (which does vocalize Devanagari). Never force `utt.lang = 'hi-IN'` when a
+  voice is available; assign `utt.voice` + `utt.lang` from `pickVoice()`.
+- **Wasm chunking differs from native:** `chunkCap()` = 110 chars for wasm
+  (its phonemize/inference is the bottleneck, not gesture latency), 50 for
+  native. Units keep `raw`/`spoken`; `unitText(u)` is the one accessor.
+- **Wasm audio is an AudioBuffer, not SpeechSynthesis:** `speakWasmChunk`
+  synthesizes in the worker, caches AudioBuffers keyed by
+  `voice|rate|pitch|text` in `state.synthCache` (capped 8, cleared on
+  panel open), schedules via OfflineAudioContext, and words get times from
+  `audibleRange()`/`wordSchedule()`. A chunk failure counts `wasmErrs`; after
+  3 strikes the engine falls back to native (status must still be `playing`).
+- **Narrator chain:** `narratorChain(text, lang)` applies a grit/presence
+  WebAudio chain (PITCH 0.92 etc.) to English/Latin chunks only when the
+  narrator checkbox (`vv_listen_narrator`) is on — Devanagari stays clean.
+  Chain is rebuilt per chunk via `chainFor()`.
+- **Wasm init must not stomp pause:** every wasm catch/fallback path bails
+  unless `state.status === 'playing'` in addition to the runId check (a
+  dismissed download confirm mid-test used to restart playback over pause).
+- **`synth()` in the worker must NOT lazy-load a voice** — the glue
+  guarantees preloading; a throw there surfaces as a chunk error, not a
+  silent hang. `crashedBefore()` (`vvTtsCompile` flag from the ORT glue)
+  expires after 7 days so a one-time Android compile crash doesn't brick
+  wasm forever.
 - **No TEST/debug button in the panel** — diagnostics go to `console.log`
-  (`TTS Debug:` prefix), including `onstart fired` which proves the engine
-  actually began speaking (the honest signal on mobile).
+  (`TTS Debug:` / `TTS wasm [voice]:` prefixes), including `onstart fired`
+  which proves the native engine actually began speaking.
 - **No fallback voice is persisted** at load — Edge's online "Natural"
   voices arrive after local ones; `pickVoice()` re-scans live so they win.
   Only an explicit user pick writes `vv_listen_voice`.
 - **localStorage keys:** `vv_listen_voice`, `vv_listen_rate`,
   `vv_listen_sync`, `vv_listen_pos_<bookId>` (position is verse-level,
-  cleared with `''` on natural finish).
+  cleared with `''` on natural finish), `vv_listen_engine` (auto|wasm|native),
+  `vv_listen_native_broken`, `vv_listen_envoice` (wasm voice id),
+  `vv_listen_narrator` (1/empty), `vv-tts-v1` (voice-download cache version).
+  `lsSet(k, null)` stores the string "null" — use `lsDel` for clearing.
 - Word highlight = CSS Custom Highlight API (`::highlight(vv-word)` in
   style.css); `updateWord` maps spoken index → shown offset via `u.map`.
+- **Panel engine row:** `#lp-engine` (auto/wasm/native), `#lp-ovoice`
+  (wasm voice picker, wasm-only), `#lp-narr` (narrator). `#lp-voice` hides
+  under wasm. `refreshEngineUi` keeps them in sync.
 
 Tested by `test-listen-edge.js` (Playwright, `channel: 'msedge'`, against a
-local static server) — 56 checks incl. the reformat route with a seeded
-`vv_reformat_book`. Re-run it after touching listen.js/reader.js wiring.
+local static server, engine pinned to native via `vv_listen_engine`) and
+`test-wasm-reformat.js` (same harness, engine forced to wasm, random English
+passage through the reformat route, download confirm auto-accepted; first run
+downloads the ~90 MB voice+engine locally). Phone smoke page: `/tts/test.html`.
+Re-run the matching suite after touching listen.js/tts/*/reader.js wiring.
