@@ -651,6 +651,7 @@ const VVListen = (() => {
       <div class="lp-row">
         <button class="lp-btn lp-play" id="lp-play" title="चलाएँ / Pause (Space)">${ICON_PLAY}</button>
         <button class="lp-btn" id="lp-stop" title="रोकें / Stop (Esc)">${ICON_STOP_SQ}</button>
+        <button class="lp-btn" id="lp-test" title="Test Audio">TEST</button>
         <button class="lp-btn" id="lp-dl" title="ऑडियो डाउनलोड करें / Download audio">${ICON_DOWNLOAD}</button>
         <select id="lp-voice" title="आवाज़ / Voice">${voiceOptionsHtml()}</select>
         <select id="lp-rate" title="गति / Speed">
@@ -674,6 +675,34 @@ const VVListen = (() => {
 
     panel.querySelector('#lp-play').onclick = togglePlay;
     panel.querySelector('#lp-stop').onclick = stop;
+    panel.querySelector('#lp-test').onclick = () => {
+      // Direct test utterance - bypasses all complex logic
+      console.log('TTS Debug: Test button clicked');
+      console.log('TTS Debug: synth.readyState:', synth.readyState);
+      console.log('TTS Debug: synth.paused:', synth.paused);
+      console.log('TTS Debug: synth.speaking:', synth.speaking);
+      
+      const testUtterance = new SpeechSynthesisUtterance('Hello test');
+      testUtterance.rate = 1;
+      testUtterance.volume = 1;
+      
+      // Try to get any available voice
+      const voices = synth.getVoices();
+      console.log('TTS Debug: Test - available voices:', voices.length);
+      
+      if(voices.length > 0) {
+        testUtterance.voice = voices[0];
+        testUtterance.lang = voices[0].lang;
+        console.log('TTS Debug: Test using voice:', voices[0].name);
+      }
+      
+      testUtterance.onstart = () => console.log('TTS Debug: Test onstart fired');
+      testUtterance.onend = () => console.log('TTS Debug: Test onend fired');
+      testUtterance.onerror = (e) => console.log('TTS Debug: Test onerror:', e.error, e.message);
+      
+      synth.speak(testUtterance);
+      console.log('TTS Debug: Test speak called');
+    };
     panel.querySelector('#lp-dl').onclick = downloadAudio;
     panel.querySelector('#lp-close').onclick = () => closePanel();
     panel.querySelector('#lp-voice').onchange = (e) => {
