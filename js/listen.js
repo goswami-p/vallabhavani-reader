@@ -17,6 +17,8 @@ const ICON_PLAY = `<svg class="icon" viewBox="0 0 20 20" width="17" height="17" 
 const ICON_PAUSE = `<svg class="icon" viewBox="0 0 20 20" width="17" height="17" fill="currentColor" stroke="none"><rect x="5" y="4" width="3.4" height="12" rx="1"/><rect x="11.6" y="4" width="3.4" height="12" rx="1"/></svg>`;
 const ICON_STOP_SQ = `<svg class="icon" viewBox="0 0 20 20" width="15" height="15" fill="currentColor" stroke="none"><rect x="4.5" y="4.5" width="11" height="11" rx="1.5"/></svg>`;
 const ICON_DOWNLOAD = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5v8.5"/><path d="M6.3 8.7L10 12.4l3.7-3.7"/><path d="M4 15.5h12"/></svg>`;
+const ICON_PREV = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" stroke="none"><path d="M6 4v12l8-6z"/><path d="M4 4v12" stroke="currentColor" stroke-width="1" opacity="0.3"/></svg>`;
+const ICON_NEXT = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" stroke="none"><path d="M14 4v12L6 10z"/><path d="M16 4v12" stroke="currentColor" stroke-width="1" opacity="0.3"/></svg>`;
 
 const VVListen = (() => {
   const LS_VOICE = 'vv_listen_voice', LS_RATE = 'vv_listen_rate', LS_SYNC = 'vv_listen_sync';
@@ -122,7 +124,12 @@ const VVListen = (() => {
           continue;
         }
         if('#*_`~\\|'.indexOf(c) !== -1) continue;            // residual inline markdown symbols
-        if(c === '[' || c === ']'){ continue; }               // link/image brackets — label text sits outside
+        // brackets in shown text (e.g. [text](url)) — spoken text doesn’t include them,
+        // but we MUST still record the position so later indices stay aligned.
+        // For links, we’ll speak the label text inside the brackets; for images, we skip.
+        // So: if seen '[' → skip it, but record position. If seen ']' → skip, but record.
+        // This keeps the spoken→shown map aligned.
+        if(c === '[' || c === ']'){ continue; }
         out.push(c); map.push(k);
       }
       // Real line break between paragraphs/pādas becomes a spoken pause.
@@ -336,6 +343,31 @@ const VVListen = (() => {
     while(sp > s.a && !/\s/.test(u.spoken[sp])) sp--;
     if(/\s/.test(u.spoken[sp])) sp++;
     return sp;
+  }
+  // Go to previous sentence
+  function goPrevSentence(){
+    const u = state.units[state.unitIdx];
+    if(!u || !u.sents) return;
+    if(state.sentIdx > 0){
+      state.sentIdx--;
+      state.wordPos = null;
+      state.chunkOverride = null;
+      restartCurrentChunk();
+    }
+  }
+  // Go to next sentence
+  function goNextSentence(){
+    const u = state.units[state.unitIdx];
+    if(!u || !u.sents) return;
+    if(state.sentIdx < u.sents.length - 1){
+      state.sentIdx++;
+      state.wordPos = null;
+      state.chunkOverride = null;
+      restartCurrentChunk();
+    } else {
+      // Next sentence in next unit
+      advanceChunk();
+    }
   }
   function speakChain(rid){
     if(rid !== state.runId) return;
@@ -551,11 +583,13 @@ const VVListen = (() => {
         <button class="lp-btn lp-close" id="lp-close" title="बंद करें / Close">${ICON_CLOSE}</button>
       </div>
       <div class="lp-row lp-sub">
+        <button class="lp-btn" id="lp-prev-sent" title="पिछला वाक्य / Previous sentence (B)">${ICON_PREV}</button>
+        <button class="lp-btn" id="lp-next-sent" title="अगला वाक्य / Next sentence (N)">${ICON_NEXT}</button>
         <span class="lp-ref" id="lp-ref">—</span>
         <button class="lp-continue" id="lp-continue" hidden></button>
         <label class="lp-sync" title="हाइलाइट सिंक / Highlight sync">
           <span>सिंक</span>
-          <input type="range" id="lp-sync-range" min="-1500" max="1500" step="50" value="${state.syncMs}">
+          <input type="range" id="lp-sync-range" min="0" max="100" step="1" value="50">
         </label>
       </div>`;
     document.body.appendChild(panel);
@@ -571,7 +605,20 @@ const VVListen = (() => {
     };
     panel.querySelector('#lp-rate').onchange = (e) => setRate(e.target.value);
     const syncEl = panel.querySelector('#lp-sync-range');
-    syncEl.oninput = (e) => { state.syncMs = parseInt(e.target.value, 10) || 0; lsSet(LS_SYNC, String(state.syncMs)); };
+    syncEl.oninput = (e) => { 
+      // Slider value 0-100 maps to sync offset -1500 to +1500ms
+      const val = parseInt(e.target.value, 10);
+      state.syncMs = Math.round((val - 50) / 50 * 1500);  // -1500 to +1500
+      lsSet(LS_SYNC, String(state.syncMs));
+    };
+    // Update slider to match current syncMs on panel open
+    if(state.syncMs) {
+      const val = Math.round((state.syncMs / 1500) * 50 + 50);
+      syncEl.value = Math.min(100, Math.max(0, val));
+    }
+    // Prev/Next sentence buttons
+    panel.querySelector('#lp-prev-sent').onclick = () => { goPrevSentence(); };
+    panel.querySelector('#lp-next-sent').onclick = () => { goNextSentence(); };
 
     // "Continue" — where the last visit left off on this book. Refreshed
     // again on every stop so a mid-book stop in this session offers it too.
@@ -599,6 +646,8 @@ const VVListen = (() => {
         if(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || t.tagName === 'BUTTON' || t.tagName === 'A')) return;
         e.preventDefault(); togglePlay();
       } else if(e.key === 'Escape'){ stop(); }
+      else if(e.key.toLowerCase() === 'b' || e.key === 'ArrowLeft'){ goPrevSentence(); }
+      else if(e.key.toLowerCase() === 'n' || e.key === 'ArrowRight'){ goNextSentence(); }
     };
     document.addEventListener('keydown', state.keyHandler);
     updatePanel();
