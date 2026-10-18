@@ -91,16 +91,21 @@ const VVListen = (() => {
       const v = state.voices.find(v => v.voiceURI === state.voiceURI);
       if(v) return v;
     }
-    // 2. Natural English voices (preferred)
+    // 2. Hindi voice first — the content is Devanagari; on Android Chrome an
+    //    English engine given Devanagari text outputs SILENCE (Edge's Natural
+    //    voices are desktop-Edge-only and never appear on phones anyway).
+    const hi = state.voices.find(v => /^hi/i.test(v.lang));
+    if(hi) return hi;
+    // 3. Natural English voices (desktop Edge — English text fallback)
     const natural = state.voices.find(v => /natural/i.test(v.name) && /^en/i.test(v.lang));
     if(natural) return natural;
-    // 3. Online English voices (Edge natural)
+    // 4. Online English voices (Edge natural)
     const online = state.voices.find(v => /^en/i.test(v.lang) && /online/i.test(v.name));
     if(online) return online;
-    // 4. Any English voice (fallback for mobile)
+    // 5. Any English voice (fallback for mobile)
     const anyEn = state.voices.find(v => /^en/i.test(v.lang));
     if(anyEn) return anyEn;
-    // 5. Any available voice (last resort)
+    // 6. Any available voice (last resort)
     return state.voices[0] || null;
   }
   function setVoice(uri){
@@ -413,12 +418,22 @@ const VVListen = (() => {
     const text = u.spoken.slice(a, s.b);
     if(!text.trim()){ state.sentIdx++; speakChain(rid); return; }
     const utt = new SpeechSynthesisUtterance(text);
+    // pickVoice() prefers a hi-* voice (mobile rule: an Android English
+    // engine given Devanagari text completes SILENTLY — no audio, while the
+    // rAF highlighter keeps moving). Desktop Edge has no Hindi voice, falls
+    // back to its English voice, which DOES vocalize Devanagari — the old
+    // behavior that works on PC stays intact.
     const v = pickVoice();
     if(v){ utt.voice = v; utt.lang = v.lang; }
+    else if(/[\u0900-\u097F]/.test(text)) utt.lang = 'hi-IN';   // no voices at all yet: let the OS choose
     utt.rate = state.rate;
     utt.volume = 1.0;  // Explicitly set volume to max
     utt.pitch = 1.0;   // Normal pitch
     const myRun = rid, myU = state.unitIdx, myS = state.sentIdx;
+    utt.onstart = () => {
+      if(myRun !== state.runId) return;
+      console.log('TTS Debug: onstart fired — engine ACTUALLY speaking');
+    };
     utt.onboundary = (e) => {
       if(myRun !== state.runId || myU !== state.unitIdx || myS !== state.sentIdx) return;
       if(typeof e.charIndex === 'number'){
@@ -499,10 +514,7 @@ const VVListen = (() => {
       toast('No content to read');
       return;
     }
-    
-    // Mobile fix: Cancel any pending utterances first
-    synth.cancel();
-    
+
     // Check for available voices - mobile Chrome needs user interaction first
     if(!state.voices || state.voices.length === 0) {
       // Force reload voices on user interaction (required for mobile)
@@ -540,7 +552,18 @@ const VVListen = (() => {
     state.wordPos = null;
     state.chunkOverride = null; state.chunkLen = 0;
     state.status = 'playing';
-    setTimeout(() => { if(rid === state.runId) speakChain(rid); }, 60);
+    const start = () => { if(rid === state.runId) speakChain(rid); };
+    // Fresh queue → speak SYNCHRONOUSLY inside the tap (mobile TTS engines
+    // ignore speak() kicked off from a timer after the gesture, and cancel()
+    // on an idle queue can wedge Android Chrome). Only when something is
+    // genuinely still speaking/pending do we cancel + wait 60ms first.
+    if(synth.speaking || synth.pending){
+      console.log('TTS Debug: queue busy — cancel + 60ms then start');
+      synth.cancel();
+      setTimeout(start, 60);
+    } else {
+      start();
+    }
     updatePanel();
   }
   function pause(){
@@ -651,7 +674,6 @@ const VVListen = (() => {
       <div class="lp-row">
         <button class="lp-btn lp-play" id="lp-play" title="चलाएँ / Pause (Space)">${ICON_PLAY}</button>
         <button class="lp-btn" id="lp-stop" title="रोकें / Stop (Esc)">${ICON_STOP_SQ}</button>
-        <button class="lp-btn" id="lp-test" title="Test Audio">TEST</button>
         <button class="lp-btn" id="lp-dl" title="ऑडियो डाउनलोड करें / Download audio">${ICON_DOWNLOAD}</button>
         <select id="lp-voice" title="आवाज़ / Voice">${voiceOptionsHtml()}</select>
         <select id="lp-rate" title="गति / Speed">
@@ -675,34 +697,6 @@ const VVListen = (() => {
 
     panel.querySelector('#lp-play').onclick = togglePlay;
     panel.querySelector('#lp-stop').onclick = stop;
-    panel.querySelector('#lp-test').onclick = () => {
-      // Direct test utterance - bypasses all complex logic
-      console.log('TTS Debug: Test button clicked');
-      console.log('TTS Debug: synth.readyState:', synth.readyState);
-      console.log('TTS Debug: synth.paused:', synth.paused);
-      console.log('TTS Debug: synth.speaking:', synth.speaking);
-      
-      const testUtterance = new SpeechSynthesisUtterance('Hello test');
-      testUtterance.rate = 1;
-      testUtterance.volume = 1;
-      
-      // Try to get any available voice
-      const voices = synth.getVoices();
-      console.log('TTS Debug: Test - available voices:', voices.length);
-      
-      if(voices.length > 0) {
-        testUtterance.voice = voices[0];
-        testUtterance.lang = voices[0].lang;
-        console.log('TTS Debug: Test using voice:', voices[0].name);
-      }
-      
-      testUtterance.onstart = () => console.log('TTS Debug: Test onstart fired');
-      testUtterance.onend = () => console.log('TTS Debug: Test onend fired');
-      testUtterance.onerror = (e) => console.log('TTS Debug: Test onerror:', e.error, e.message);
-      
-      synth.speak(testUtterance);
-      console.log('TTS Debug: Test speak called');
-    };
     panel.querySelector('#lp-dl').onclick = downloadAudio;
     panel.querySelector('#lp-close').onclick = () => closePanel();
     panel.querySelector('#lp-voice').onchange = (e) => {

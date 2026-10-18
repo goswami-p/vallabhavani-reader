@@ -87,10 +87,25 @@ Key invariants if this code is touched:
   not in the DOM) strips tags before speaking; the normal path uses
   `textContent` so it's already clean. Don't "simplify" the strip away.
 - **`runId` staleness guard:** every play/stop/restart bumps it; utterance
-  handlers bail if stale. `synth.cancel()` + 60ms delay before re-speak
-  (Chromium drops speak-immediately-after-cancel); pause = cancel, resume =
-  re-speak the current chunk from `currentChunkStartWord()` via
-  `chunkOverride` — don't try `synth.pause()/resume()` on long utterances.
+  handlers bail if stale. **Fresh `play()` speaks SYNCHRONOUSLY inside the tap**
+  (no `cancel()` first, no timer — mobile TTS engines ignore speak() kicked off
+  from a timer after the gesture, and cancel() on an idle queue wedges Android
+  Chrome: highlight kept moving via the rAF timer while nothing was audible).
+  `cancel()` + 60ms delay applies only where a real cancel happened:
+  `restartCurrentChunk()` (rate/voice change, resume) and play() only if the
+  queue is genuinely `speaking/pending`. Pause = cancel, resume = re-speak the
+  current chunk from `currentChunkStartWord()` via `chunkOverride` — don't try
+  `synth.pause()/resume()` on long utterances.
+- **Voice pick must match the text's script:** `pickVoice()` prefers a `hi-*`
+  voice (Android's English engine given Devanagari text completes silently —
+  onstart/onend fire instantly, zero audio, while the rAF highlighter keeps
+  moving). Desktop Edge has no Hindi voice, falls back to its English voice
+  (which does vocalize Devanagari) — the PC path stays as it was. Never force
+  `utt.lang = 'hi-IN'` when a voice is available; assign `utt.voice` +
+  `utt.lang` from `pickVoice()`.
+- **No TEST/debug button in the panel** — diagnostics go to `console.log`
+  (`TTS Debug:` prefix), including `onstart fired` which proves the engine
+  actually began speaking (the honest signal on mobile).
 - **No fallback voice is persisted** at load — Edge's online "Natural"
   voices arrive after local ones; `pickVoice()` re-scans live so they win.
   Only an explicit user pick writes `vv_listen_voice`.

@@ -218,16 +218,18 @@ const { chromium } = require('playwright');
   check('::highlight(vv-word) CSS rule present', hlRule);
 
   // 19b. REFORMAT route — the user's actual target (#/reformat → #/book/reformat/read).
-  // Seed a small reformat book in localStorage (hi-only, noNum verses, HTML in `hi`).
+  // Seed a small reformat book in localStorage (noNum verses, HTML in `hi`).
+  // English text on purpose: TTS language/voice quirks must not decide whether
+  // these plumbing checks pass (Gita/Hindi content is not the test subject).
   await page.evaluate(() => {
     const rf = {
-      id: 'reformat', title: { hi: 'परीक्षण पाठ' },
+      id: 'reformat', title: { hi: 'Reformat Test Book' },
       tagline: { hi: '' }, languages: ['hi'], hasSkandh: false, adhyayCount: 1,
-      adhyays: { '1': { title: { hi: 'परीक्षण पाठ' }, verses: [
-        { num: 0, hi: '<b class="rf-title">परीक्षण पाठ</b>', noNum: true },
-        { num: 1, hi: 'यह पहला अनुच्छेद है। इसमें दो वाक्य हैं।', noNum: true },
-        { num: 2, hi: 'यह दूसरा अनुच्छेद है। <b>बोल्ड टेक्स्ट</b> भी है।', noNum: true },
-        { num: 3, hi: 'यह तीसरा अनुच्छेद है।', noNum: true }
+      adhyays: { '1': { title: { hi: 'Reformat Test Book' }, verses: [
+        { num: 0, hi: '<b class="rf-title">Reformat Test Book</b>', noNum: true },
+        { num: 1, hi: 'Hello this is the first paragraph of the reformat test content.', noNum: true },
+        { num: 2, hi: 'Second paragraph here with <b>bold words</b> inside the prose.', noNum: true },
+        { num: 3, hi: 'Hello third paragraph closes the reformat test text.', noNum: true }
       ] } }
     };
     localStorage.setItem('vv_reformat_book', JSON.stringify(rf));
@@ -240,7 +242,7 @@ const { chromium } = require('playwright');
   await page.waitForSelector('.listen-panel', { timeout: 5000 });
   const rfUnits = await page.evaluate(() => ({ n: VVListen._state.units.length, raws: VVListen._state.units.map(u => u.raw), bookId: VVListen._state.bookId }));
   check('reformat: units built from seeded paragraphs (incl. title)', rfUnits.n === 4, 'n=' + rfUnits.n);
-  check('reformat: raw text holds clean prose after tag-strip check', rfUnits.raws.some(r => r.includes('यह पहला अनुच्छेद है')) && rfUnits.raws.some(r => r.includes('बोल्ड टेक्स्ट')));
+  check('reformat: raw text holds clean prose after tag-strip check', rfUnits.raws.some(r => r.includes('Hello this is the first paragraph')) && rfUnits.raws.some(r => r.includes('bold words')));
   await page.click('#lp-play');
   await page.waitForTimeout(600);
   const rfSt = await page.evaluate(() => ({ status: VVListen._state.status, hl: !!(CSS.highlights && CSS.highlights.has('vv-word')), unitIdx: VVListen._state.unitIdx, spoken0: VVListen._state.units[0] ? VVListen._state.units[0].spoken : '', ready0: !!(VVListen._state.units[0] && VVListen._state.units[0]._ready) }));
