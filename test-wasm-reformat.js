@@ -30,8 +30,9 @@ const { chromium } = require('playwright');
   await page.waitForSelector('.listen-panel', { timeout: 5000 });
   console.log('PASS — panel opens');
 
-  const eng = await page.$eval('#lp-engine', el => el.value);
-  console.log('PASS — engine select pref =', eng);
+  const voiceVal = await page.$eval('#lp-voice', el => el.value);
+  if (voiceVal && voiceVal.indexOf('piper:') === 0) console.log('PASS — voice dropdown shows offline voice =', voiceVal);
+  else console.log('WARN — voice dropdown not on offline voice [' + voiceVal + ']');
 
   await page.click('#lp-play');
 

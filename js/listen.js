@@ -216,15 +216,11 @@ const VVListen = (() => {
   setTimeout(loadVoices, 1000);
   function refreshVoiceSelect(){
     const sel = state.panel && state.panel.querySelector('#lp-voice');
-    const status = state.panel && state.panel.querySelector('#lp-status');
-    if(!sel || !state.voices.length) {
-      if(status) status.textContent = `voices: ${state.voices.length}`;
-      return;
-    }
+    if(!sel) return;
     sel.innerHTML = voiceOptionsHtml();
-    const cur = pickVoice();
-    if(cur) sel.value = cur.voiceURI;
-    if(status) status.textContent = `voices: ${state.voices.length}`;
+    sel.value = currentVoiceValue();
+    const status = state.panel && state.panel.querySelector('#lp-status');
+    if(status) status.textContent = EN_VOICES.length + ' offline · ' + state.voices.length + ' device';
   }
   function pickVoice(text){
     // 1. User's explicit choice
@@ -891,7 +887,7 @@ const VVListen = (() => {
     const eng = chooseEngine();
     if(eng === 'wasm'){ playWasm(fromUnit, fromSent); return; }
     if(IS_ANDROID && lsGet(LS_ENGINE, 'auto') === 'auto' && crashFlagged())
-      toast('Offline voice crashed this phone earlier. Choose "Offline voice" in the engine list to retry.');
+      toast('Offline voice crashed this phone earlier — pick an offline voice from the list to force a retry.');
     state.engine = 'native';
     stopWasmAudio();
     if(!supported) {
@@ -1046,11 +1042,22 @@ const VVListen = (() => {
   }
 
   /* ---------------- Panel (UI component) ---------------- */
+  /* What the merged voice dropdown should show as selected: offline (Piper)
+     voices live in the same list as device voices — value prefix `piper:`
+     selects the wasm engine, a plain voiceURI selects the device engine. */
+  function currentVoiceValue(){
+    if(chooseEngine() === 'wasm') return 'piper:' + enVoice();
+    const v = pickVoice();
+    return v ? v.voiceURI : '';
+  }
   function voiceOptionsHtml(){
-    if(!state.voices.length) return `<option value="">लोड हो रहा है…</option>`;
-    return state.voices.map(v =>
-      `<option value="${v.voiceURI}" ${v.voiceURI === (pickVoice() || {}).voiceURI ? 'selected' : ''}>${v.name} (${v.lang})</option>`
-    ).join('');
+    const cur = currentVoiceValue();
+    const off = `<optgroup label="Offline voice (download once)">${EN_VOICES.map(v =>
+      `<option value="piper:${v.id}" ${('piper:' + v.id) === cur ? 'selected' : ''}>${v.label} — offline</option>`).join('')}</optgroup>`;
+    if(!state.voices.length) return off;
+    const nat = `<optgroup label="Device voice">${state.voices.map(v =>
+      `<option value="${v.voiceURI}" ${v.voiceURI === cur ? 'selected' : ''}>${v.name} (${v.lang})</option>`).join('')}</optgroup>`;
+    return off + nat;
   }
   function openPanel(opts){
     stop();                                              // never rebuild units under a live playback chain
@@ -1085,18 +1092,10 @@ const VVListen = (() => {
           <span>सिंक</span>
           <input type="range" id="lp-sync-range" min="0" max="100" step="1" value="50">
         </label>
-        <span id="lp-status" style="font-size:10px;color:#888;">voices: ${state.voices.length}</span>
+        <span id="lp-status" style="font-size:10px;color:#888;">${EN_VOICES.length} offline · ${state.voices.length} device</span>
       </div>
       <div class="lp-row lp-sub" id="lp-engine-row" style="flex-wrap:wrap;gap:6px;font-size:12px">
-        <select id="lp-engine" title="Engine">
-          <option value="auto">Voice: auto</option>
-          <option value="wasm">Offline voice</option>
-          <option value="native">Device voice</option>
-        </select>
-        <select id="lp-ovoice" title="Offline English voice">
-          ${EN_VOICES.map(v => `<option value="${v.id}">${v.label}</option>`).join('')}
-        </select>
-        <label id="lp-narr-wrap" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="lp-narr"> narrator</label>
+        <label id="lp-narr-wrap" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="lp-narr"> narrator (fantasy voice)</label>
       </div>`;
     document.body.appendChild(panel);
     state.panel = panel;
@@ -1105,9 +1104,33 @@ const VVListen = (() => {
     panel.querySelector('#lp-stop').onclick = stop;
     panel.querySelector('#lp-dl').onclick = downloadAudio;
     panel.querySelector('#lp-close').onclick = () => closePanel();
-    panel.querySelector('#lp-voice').onchange = (e) => {
-      setVoice(e.target.value);
-      if(state.status === 'playing') restartCurrentChunk();
+    panel.querySelector('#lp-voice').onchange = async (e) => {
+      const val = e.target.value;
+      if(val && val.indexOf('piper:') === 0){                 // offline Piper voice → wasm engine
+        const id = val.slice(6);
+        lsSet(LS_ENGINE, 'wasm');
+        state.forceNative = false; state.nativeSuspect = 0;
+        state.ttsVoice = id; lsSet(LS_EN, id);
+        refreshEngineUi();
+        try {
+          await ensureOffline(neededVoices());
+        } catch(err){
+          toast(err && err.declined ? 'Voice not downloaded yet — tap Play to retry' : 'Voice failed: ' + (err && err.message));
+          e.target.value = currentVoiceValue();
+          return;
+        }
+        state.synthCache.clear();
+        if(window.VVTTS && VVTTS.flush) VVTTS.flush();
+      } else {                                                // device voice → native engine
+        lsSet(LS_ENGINE, 'native');
+        state.forceNative = false; state.nativeSuspect = 0;
+        setVoice(val);
+        refreshEngineUi();
+      }
+      if(state.status === 'playing' || state.status === 'paused'){
+        const u = state.unitIdx, s = state.sentIdx;
+        stop(); play(u, s);
+      }
     };
     panel.querySelector('#lp-rate').onchange = (e) => setRate(e.target.value);
     const syncEl = panel.querySelector('#lp-sync-range');
@@ -1185,41 +1208,14 @@ const VVListen = (() => {
     const p = state.panel; if(!p) return;
     const wasm = chooseEngine() === 'wasm';
     const show = (sel, on) => { const el = p.querySelector(sel); if(el) el.style.display = on ? '' : 'none'; };
-    show('#lp-voice', !wasm); show('#lp-ovoice', wasm); show('#lp-narr-wrap', wasm);
+    show('#lp-engine-row', wasm);   // narrator only applies to offline voices
+    const sel = p.querySelector('#lp-voice');
+    if(sel) sel.value = currentVoiceValue();
   }
   function wireEnginePanel(p){
-    const eSel = p.querySelector('#lp-engine'), vSel = p.querySelector('#lp-ovoice'), nChk = p.querySelector('#lp-narr');
-    if(!eSel || !vSel || !nChk) return;
-    eSel.value = lsGet(LS_ENGINE, 'auto');
-    vSel.value = enVoice();
+    const nChk = p.querySelector('#lp-narr');
+    if(!nChk) return;
     nChk.checked = state.narrator;
-
-    eSel.onchange = () => {
-      if(eSel.value === 'auto') lsDel(LS_ENGINE); else lsSet(LS_ENGINE, eSel.value);
-      if(eSel.value === 'auto'){ lsDel(LS_BROKEN); state.nativeBroken = false; }
-      state.forceNative = false; state.nativeSuspect = 0;
-      refreshEngineUi();
-      if(state.status === 'playing' || state.status === 'paused'){
-        const u = state.unitIdx, s = state.sentIdx;
-        stop(); play(u, s);                          // a change event is a user gesture, so audio unlock works
-      }
-    };
-    vSel.onchange = async () => {
-      const v = vSel.value;
-      if(state.engine !== 'wasm'){ state.ttsVoice = v; lsSet(LS_EN, v); return; }   // just remember it
-      try {
-        const names = neededVoices().filter(n => n === HI_VOICE).concat([v]);
-        await ensureOffline(names);
-      } catch(err){
-        vSel.value = enVoice();
-        toast(err && err.declined ? 'Voice not downloaded' : 'Voice failed: ' + (err && err.message));
-        return;
-      }
-      state.ttsVoice = v; lsSet(LS_EN, v);
-      state.synthCache.clear();
-      if(window.VVTTS && VVTTS.flush) VVTTS.flush();
-      if(state.status === 'playing') restartCurrentChunk();
-    };
     nChk.onchange = () => {
       state.narrator = nChk.checked;
       lsSet(LS_NARR, nChk.checked ? '1' : '0');
