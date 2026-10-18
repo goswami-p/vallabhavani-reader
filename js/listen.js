@@ -24,18 +24,19 @@ const VVListen = (() => {
   const LS_VOICE = 'vv_listen_voice', LS_RATE = 'vv_listen_rate', LS_SYNC = 'vv_listen_sync';
   const POS_PREFIX = 'vv_listen_pos_';
   const CHAR_MS = 65;      // timed fallback: ms per spoken character at rate 1
-  const MAX_CHUNK = 100;   // spoken chars per utterance — at rate 0.5 that's ~13 s, under the ~15 s freeze
+  const MAX_CHUNK = 50;    // mobile-friendly: smaller chunks prevent freeze (was 100)
   const synth = (typeof speechSynthesis !== 'undefined') ? speechSynthesis : null;
   const supported = !!(synth && typeof SpeechSynthesisUtterance !== 'undefined');
   const highlightOK = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight !== 'undefined';
 
   function lsGet(key, dflt){ try{ const v = localStorage.getItem(key); return v == null ? dflt : v; }catch(e){ return dflt; } }
   function lsSet(key, val){ try{ localStorage.setItem(key, val); }catch(e){ /* private mode / quota — prefs just don't persist */ } }
+  function isMobile(){ return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent); }
 
   const state = {
     voices: [],
     voiceURI: lsGet(LS_VOICE, null),
-    rate: Math.min(2, Math.max(0.5, parseFloat(lsGet(LS_RATE, '1')) || 1)),
+    rate: Math.min(2, Math.max(0.5, parseFloat(lsGet(LS_RATE, isMobile() ? '0.9' : '1')) || (isMobile() ? 0.9 : 1))),
     syncMs: Math.min(1500, Math.max(-1500, parseInt(lsGet(LS_SYNC, '0'), 10) || 0)),
     runId: 0,
     status: 'idle',                    // idle | playing | paused
@@ -65,6 +66,11 @@ const VVListen = (() => {
     // re-scans live on every use; only the user's explicit choice persists.
     refreshVoiceSelect();
   }
+  // Load voices on init AND on voicechange event (Chrome fires this)
+  loadVoices();
+  if(synth && 'onvoiceschanged' in synth) {
+    synth.onvoiceschanged = loadVoices;
+  }
   function refreshVoiceSelect(){
     const sel = state.panel && state.panel.querySelector('#lp-voice');
     if(!sel || !state.voices.length) return;
@@ -73,11 +79,22 @@ const VVListen = (() => {
     if(cur) sel.value = cur.voiceURI;
   }
   function pickVoice(){
-    return state.voices.find(v => v.voiceURI === state.voiceURI)
-      || state.voices.find(v => /natural/i.test(v.name) && /^en/i.test(v.lang))
-      || state.voices.find(v => /^en/i.test(v.lang) && /online/i.test(v.name))
-      || state.voices.find(v => /^en/i.test(v.lang))
-      || null;
+    // 1. User's explicit choice
+    if(state.voiceURI) {
+      const v = state.voices.find(v => v.voiceURI === state.voiceURI);
+      if(v) return v;
+    }
+    // 2. Natural English voices (preferred)
+    const natural = state.voices.find(v => /natural/i.test(v.name) && /^en/i.test(v.lang));
+    if(natural) return natural;
+    // 3. Online English voices (Edge natural)
+    const online = state.voices.find(v => /^en/i.test(v.lang) && /online/i.test(v.name));
+    if(online) return online;
+    // 4. Any English voice (fallback for mobile)
+    const anyEn = state.voices.find(v => /^en/i.test(v.lang));
+    if(anyEn) return anyEn;
+    // 5. Any available voice (last resort)
+    return state.voices[0] || null;
   }
   function setVoice(uri){
     state.voiceURI = uri; lsSet(LS_VOICE, uri || '');
@@ -455,8 +472,26 @@ const VVListen = (() => {
 
   /* ---------------- Transport ---------------- */
   function play(fromUnit, fromSent){
-    if(!supported) return;
-    if(!state.units.length) return;
+    if(!supported) {
+      toast('Web Speech API not supported in this browser');
+      return;
+    }
+    if(!state.units.length) {
+      toast('No content to read');
+      return;
+    }
+    // Check for available voices
+    if(!state.voices || state.voices.length === 0) {
+      toast('No voice available. Please wait for voices to load...');
+      // Try to reload voices
+      loadVoices();
+      return;
+    }
+    const picked = pickVoice();
+    if(!picked) {
+      toast('No suitable voice found. Available voices: ' + state.voices.length);
+      return;
+    }
     const rid = ++state.runId;
     stopRaf();
     synth.cancel();
