@@ -52,25 +52,27 @@ const VVListen = (() => {
   function loadVoices(){
     if(!supported) return;
     const got = synth.getVoices() || [];
-    if(got.length) state.voices = got;
-    // Natural voices first inside each language family — the picker's default
-    // pick below scans for "Natural" + English, everything else stays usable.
-    state.voices.sort((a, b) => {
-      const an = /natural/i.test(a.name) ? 0 : 1, bn = /natural/i.test(b.name) ? 0 : 1;
-      if(an !== bn) return an - bn;
-      return a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name);
-    });
-    // Deliberately NOT persisting a fallback pick here: Edge's online
-    // "… Natural" voices arrive AFTER the local ones, and pinning the early
-    // local voice to localStorage would outrank them forever. pickVoice()
-    // re-scans live on every use; only the user's explicit choice persists.
-    refreshVoiceSelect();
+    if(got.length) {
+      state.voices = got;
+      // Natural voices first inside each language family — the picker's default
+      // pick below scans for "Natural" + English, everything else stays usable.
+      state.voices.sort((a, b) => {
+        const an = /natural/i.test(a.name) ? 0 : 1, bn = /natural/i.test(b.name) ? 0 : 1;
+        if(an !== bn) return an - bn;
+        return a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name);
+      });
+      refreshVoiceSelect();
+    }
   }
-  // Load voices on init AND on voicechange event (Chrome fires this)
+  // Load voices - mobile Chrome needs multiple attempts
   loadVoices();
   if(synth && 'onvoiceschanged' in synth) {
     synth.onvoiceschanged = loadVoices;
   }
+  // Fallback: retry loading voices after delay (for mobile)
+  setTimeout(loadVoices, 100);
+  setTimeout(loadVoices, 500);
+  setTimeout(loadVoices, 1000);
   function refreshVoiceSelect(){
     const sel = state.panel && state.panel.querySelector('#lp-voice');
     const status = state.panel && state.panel.querySelector('#lp-status');
@@ -492,23 +494,32 @@ const VVListen = (() => {
       toast('No content to read');
       return;
     }
-    // Check for available voices
+    // Check for available voices - mobile Chrome needs user interaction first
     if(!state.voices || state.voices.length === 0) {
-      toast('Loading voices... (check browser settings)');
-      console.log('TTS Debug: No voices loaded yet, reloading...');
-      // Try to reload voices
+      // Force reload voices on user interaction (required for mobile)
       loadVoices();
-      // Schedule another load attempt
-      setTimeout(loadVoices, 1000);
-      setTimeout(loadVoices, 3000);
-      return;
+      const voices = synth.getVoices() || [];
+      if(voices.length > 0) {
+        state.voices = voices;
+        state.voices.sort((a, b) => {
+          const an = /natural/i.test(a.name) ? 0 : 1, bn = /natural/i.test(b.name) ? 0 : 1;
+          if(an !== bn) return an - bn;
+          return a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name);
+        });
+        refreshVoiceSelect();
+      } else {
+        toast('No voices available yet. Wait 2 seconds and try again.');
+        console.log('TTS Debug: No voices loaded yet, reloading...');
+        setTimeout(loadVoices, 500);
+        setTimeout(loadVoices, 1500);
+        return;
+      }
     }
     const picked = pickVoice();
     console.log('TTS Debug: Voices count:', state.voices.length);
     console.log('TTS Debug: Picked voice:', picked ? picked.name + ' (' + picked.lang + ')' : 'none');
     if(!picked) {
       toast('No suitable voice. Available: ' + state.voices.length + ' voices');
-      // Log all available voices for debugging
       const voiceList = state.voices.map(v => v.name + ' (' + v.lang + ')').join(', ');
       console.log('TTS Debug: All voices:', voiceList);
       return;
