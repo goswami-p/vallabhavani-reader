@@ -102,7 +102,8 @@ function prep(text){
 }
 
 async function synth(text, rate, name){
-  const v = await ensureVoice(name);
+  const v = voices.get(name);
+  if(!v) throw new Error('voice not loaded: ' + name);
   const clean = prep(text);
   if(!clean) return { samples: new Float32Array(0), sampleRate: v.cfg.audio.sample_rate, voice: name };
   const ids = await phonemize(v, clean);

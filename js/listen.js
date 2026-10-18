@@ -48,6 +48,147 @@ const VVListen = (() => {
     dl: null                          // active audio-download run, if any
   };
 
+  /* ================= OFFLINE (WASM) ENGINE: constants + helpers ================= */
+  const LS_ENGINE = 'vv_listen_engine';      // auto | wasm | native
+  const LS_BROKEN = 'vv_listen_native_broken';
+  const LS_EN = 'vv_listen_envoice';
+  const LS_NARR = 'vv_listen_narrator';      // '1' = on, default off
+  const HI_VOICE = 'hi_IN-rohan-medium';
+  const EN_VOICES = [
+    { id: 'en_GB-northern_english_male-medium', label: 'British English' },
+    { id: 'en_US-lessac-medium', label: 'US English' },
+    { id: 'en_IN-navgurukul-medium', label: 'Indian English' }
+  ];
+  const PITCH = 0.92;      // <1 = deeper narrator voice, English chunks only, only when narrator is on
+  const WASM_CAP = 110;    // chars per chunk for the wasm engine (native keeps MAX_CHUNK = 50)
+  const RE_DEV = /[ऀ-ॿ]/g, RE_LAT = /[A-Za-z]/g;   // counting only, use with match()
+  const HAS_DEV = /[ऀ-ॿ]/;                          // testing
+  const IS_ANDROID = /Android/i.test(navigator.userAgent);
+  function lsDel(key){ try{ localStorage.removeItem(key); }catch(e){} }
+
+  Object.assign(state, {
+    engine: 'native', actx: null, chain: null, curSrc: null, curU: null,
+    audioT0: 0, wordTimes: null, wordIdx: 0, chunkSeq: 0, wasmErrs: 0,
+    nativeSuspect: 0, nativeBroken: false, forceNative: false,
+    synthCache: new Map(), ttsReady: new Set(),
+    ttsVoice: lsGet(LS_EN, EN_VOICES[0].id),
+    narrator: lsGet(LS_NARR, '0') === '1'
+  });
+
+  const chunkCap = () => state.engine === 'wasm' ? WASM_CAP : MAX_CHUNK;
+  const enVoice = () => EN_VOICES.some(v => v.id === state.ttsVoice) ? state.ttsVoice : EN_VOICES[0].id;
+  function setStatus(t){ const el = state.panel && state.panel.querySelector('#lp-status'); if(el) el.textContent = t; }
+  function unitText(u){ return u.spoken != null ? u.spoken : String(u.raw || '').replace(/<[^>]*>/g, ' '); }
+  function crashFlagged(){
+    try{ const t = +localStorage.getItem('vvTtsCompile'); return !!t && Date.now() - t < 7 * 864e5; }catch(e){ return false; }
+  }
+
+  /* narrator colour: warm low end, presence, parallel mid-band grit */
+  function narratorChain(ctx){
+    const input = ctx.createGain(), out = ctx.createGain();
+    const low = ctx.createBiquadFilter();  low.type = 'lowshelf'; low.frequency.value = 180; low.gain.value = 6;
+    const pres = ctx.createBiquadFilter(); pres.type = 'peaking'; pres.frequency.value = 2400; pres.Q.value = 0.9; pres.gain.value = 3;
+    const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.frequency.value = 1800; band.Q.value = 0.7;
+    const shaper = ctx.createWaveShaper();
+    const k = 40, n = 1024, curve = new Float32Array(n);
+    for(let i = 0; i < n; i++){ const x = i * 2 / (n - 1) - 1; curve[i] = Math.tanh(k * x) / Math.tanh(k); }
+    shaper.curve = curve; shaper.oversample = '2x';
+    const grit = ctx.createGain(); grit.gain.value = 0.12;
+    input.connect(low); low.connect(pres); pres.connect(out);
+    low.connect(band); band.connect(shaper); shaper.connect(grit); grit.connect(out);
+    return { input, output: out };
+  }
+
+  /* Must run synchronously inside the user's tap (playWasm calls it before any await). */
+  function unlockAudio(){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return false;
+    if(!state.actx){ state.actx = new AC(); state.chain = null; }
+    if(state.actx.state === 'suspended') state.actx.resume();
+    if(!state.chain){ state.chain = narratorChain(state.actx); state.chain.output.connect(state.actx.destination); }
+    try {
+      const b = state.actx.createBuffer(1, 1, 22050), s = state.actx.createBufferSource();
+      s.buffer = b; s.connect(state.actx.destination); s.start(0);
+    } catch(e){}
+    return true;
+  }
+
+  function wasmCapable(){
+    if(!(typeof Worker === 'function' && typeof WebAssembly === 'object' && 'caches' in self)) return false;
+    if(crashFlagged()) return false;
+    if(navigator.deviceMemory && navigator.deviceMemory < 2) return false;
+    return true;
+  }
+
+  function chooseEngine(){
+    if(state.forceNative && supported) return 'native';
+    const pref = lsGet(LS_ENGINE, 'auto');
+    if(pref === 'wasm') return 'wasm';
+    if(!supported) return 'wasm';
+    if(pref === 'native') return 'native';
+    const broken = state.nativeBroken || (+lsGet(LS_BROKEN, '0') > Date.now() - 30 * 864e5);
+    return ((IS_ANDROID || broken) && wasmCapable()) ? 'wasm' : 'native';
+  }
+
+  /* Two strikes before switching. Returns true if it switched engines. */
+  function suspectNative(why, weight){
+    if(state.forceNative || lsGet(LS_ENGINE, 'auto') === 'native') return false;   // respect manual choice
+    if(state.status !== 'playing') return false;
+    state.nativeSuspect += (weight || 1);
+    console.log('TTS: native suspect', state.nativeSuspect, why);
+    if(state.nativeSuspect < 2 || !wasmCapable()) return false;
+    state.nativeBroken = true; lsSet(LS_BROKEN, String(Date.now()));
+    if(synth) synth.cancel();
+    toast('Device voice is silent here, switching to offline voice');
+    playWasm(state.unitIdx, state.sentIdx);
+    return true;
+  }
+
+  let ttsLoad = null;
+
+  function loadHiTTS(){
+    if(window.VVTTS) return Promise.resolve();
+    return ttsLoad || (ttsLoad = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = '/tts/tts-engine.js';
+      s.onload = () => window.VVTTS ? res() : (ttsLoad = null, rej(new Error('VVTTS global missing')));
+      s.onerror = () => { ttsLoad = null; rej(new Error('/tts/tts-engine.js failed to load')); };
+      document.head.appendChild(s);
+    }));
+  }
+
+  /* Which voices does this article need? Counts letters by script across all units. */
+  function neededVoices(){
+    let D = 0, L = 0;
+    state.units.forEach(u => {
+      const t = unitText(u);
+      D += (t.match(RE_DEV) || []).length;
+      L += (t.match(RE_LAT) || []).length;
+    });
+    const tot = D + L, en = enVoice();
+    const needHi = D > 0 && D >= 0.10 * tot, needEn = L > 0 && L >= 0.10 * tot;
+    const out = [];
+    if(needEn || (!needHi)) out.push(en);
+    if(needHi) out.push(HI_VOICE);
+    return out;
+  }
+
+  /* Per chunk: returns a loaded voice id, or null = skip (Devanagari chunk but Hindi voice not loaded). */
+  function voiceForChunk(text){
+    const d = (text.match(RE_DEV) || []).length, l = (text.match(RE_LAT) || []).length;
+    const ready = state.ttsReady;
+    if(d > 0 && d >= l) return ready.has(HI_VOICE) ? HI_VOICE : null;
+    const en = enVoice();
+    if(ready.has(en)) return en;
+    for(const v of ready) return v;                 // Latin text, only some other voice is loaded
+    return null;
+  }
+  const chainFor = voice => !!(state.narrator && state.chain && voice && !/^hi_/.test(voice));
+  function rateFor(voice){
+    const mr = Math.min(1.5, Math.max(0.75, state.rate / (chainFor(voice) ? PITCH : 1)));
+    return { mr, resid: state.rate / mr };
+  }
+
   /* ---------------- Voices ---------------- */
   function loadVoices(){
     if(!supported) return;
@@ -85,28 +226,22 @@ const VVListen = (() => {
     if(cur) sel.value = cur.voiceURI;
     if(status) status.textContent = `voices: ${state.voices.length}`;
   }
-  function pickVoice(){
+  function pickVoice(text){
     // 1. User's explicit choice
     if(state.voiceURI) {
       const v = state.voices.find(v => v.voiceURI === state.voiceURI);
       if(v) return v;
     }
-    // 2. Hindi voice first — the content is Devanagari; on Android Chrome an
-    //    English engine given Devanagari text outputs SILENCE (Edge's Natural
-    //    voices are desktop-Edge-only and never appear on phones anyway).
-    const hi = state.voices.find(v => /^hi/i.test(v.lang));
-    if(hi) return hi;
-    // 3. Natural English voices (desktop Edge — English text fallback)
+    // 2. Script-aware defaults — on Android Chrome an English engine given
+    //    Devanagari text outputs SILENCE; Edge's Natural voices are
+    //    desktop-only. English text prefers English voices.
     const natural = state.voices.find(v => /natural/i.test(v.name) && /^en/i.test(v.lang));
-    if(natural) return natural;
-    // 4. Online English voices (Edge natural)
     const online = state.voices.find(v => /^en/i.test(v.lang) && /online/i.test(v.name));
-    if(online) return online;
-    // 5. Any English voice (fallback for mobile)
     const anyEn = state.voices.find(v => /^en/i.test(v.lang));
-    if(anyEn) return anyEn;
-    // 6. Any available voice (last resort)
-    return state.voices[0] || null;
+    const hi = state.voices.find(v => /^hi/i.test(v.lang));
+    const englishText = !!text && !HAS_DEV.test(text);
+    const order = englishText ? [natural, online, anyEn, hi] : [hi, natural, online, anyEn];
+    return order.find(Boolean) || state.voices[0] || null;
   }
   function setVoice(uri){
     state.voiceURI = uri; lsSet(LS_VOICE, uri || '');
@@ -118,6 +253,8 @@ const VVListen = (() => {
     state.rate = r; lsSet(LS_RATE, String(r));
     const sel = state.panel && state.panel.querySelector('#lp-rate');
     if(sel) sel.value = String(r);
+    state.synthCache.clear();
+    if(window.VVTTS && VVTTS.flush) VVTTS.flush();
     // Rate changed mid-sentence: cancel + re-speak the current chunk from the
     // current word with the new rate (same runId bookkeeping as a restart).
     if(state.status === 'playing') restartCurrentChunk();
@@ -170,8 +307,9 @@ const VVListen = (() => {
   }
 
   /* Sentences of a spoken string as {a,b} offsets, each chunk force-capped at
-     MAX_CHUNK chars at a word boundary (long utterances freeze ~15 s in). */
+     the engine's chunk size at a word boundary (long utterances freeze ~15 s in). */
   function sentencesOf(spoken){
+    const CAP = chunkCap();
     const raw = [];
     const re = /[^.!?।॥…\n]+[.!?।॥…]+(?=\s|$)|[^.!?।॥…\n]+(?=\n|$)/g;
     let m;
@@ -180,9 +318,9 @@ const VVListen = (() => {
     const out = [];
     raw.forEach(s => {
       let a = s.a;
-      while(s.b - a > MAX_CHUNK){
-        let cut = spoken.lastIndexOf(' ', a + MAX_CHUNK);
-        if(cut <= a) cut = a + MAX_CHUNK;
+      while(s.b - a > CAP){
+        let cut = spoken.lastIndexOf(' ', a + CAP);
+        if(cut <= a) cut = a + CAP;
         out.push({ a, b: cut });
         a = cut;
         while(a < s.b && spoken[a] === ' ') a++;
@@ -252,8 +390,8 @@ const VVListen = (() => {
   // (horizontal page mode, other page) ask reveal() to bring them in first;
   // still missing → speak the raw data text with no highlight rather than
   // skipping the verse.
-  function activateUnit(u){
-    if(state.reveal) state.reveal(u.chKey, u.vnum);
+  function activateUnit(u, ahead){
+    if(!ahead && state.reveal) state.reveal(u.chKey, u.vnum);
     const root = state.content;
     const els = [];
     if(root){
@@ -261,6 +399,7 @@ const VVListen = (() => {
         root.querySelectorAll(sel).forEach(el => { if(!els.includes(el)) els.push(el); });
       });
     }
+    if(ahead && !els.length) return false;       // not rendered yet: leave it for the real activation
     u.els = els.length ? els : null;
     if(els.length){
       let shown = '';
@@ -275,7 +414,8 @@ const VVListen = (() => {
       u.spoken = spoken; u.map = null;   // map null → no highlight for this unit
     }
     u.sents = sentencesOf(u.spoken);
-    u._ready = true;
+    u._ready = true; u._ahead = !!ahead; u._cap = chunkCap();
+    return true;
   }
 
   /* ---------------- Word highlight ---------------- */
@@ -403,7 +543,15 @@ const VVListen = (() => {
     // advance to next unit that has content
     while(state.unitIdx < state.units.length){
       const u = state.units[state.unitIdx];
+      if(u._ahead){ u._ready = false; u._ahead = false; }     // only pre-read for prefetch: do the real activation (with reveal)
       if(!u._ready) activateUnit(u);
+      else if(u._cap !== chunkCap()){                          // engine changed since this unit was chunked
+        const old = u.sents && u.sents[state.sentIdx], anchor = old ? old.a : 0;
+        activateUnit(u);
+        let i = 0;
+        while(i + 1 < u.sents.length && u.sents[i + 1].a <= anchor) i++;
+        state.sentIdx = i;
+      }
       if(u.sents && u.sents.length && state.sentIdx < u.sents.length) break;
       savePos();
       state.unitIdx++; state.sentIdx = 0; state.wordPos = null;
@@ -417,20 +565,26 @@ const VVListen = (() => {
     state.chunkOverride = null;
     const text = u.spoken.slice(a, s.b);
     if(!text.trim()){ state.sentIdx++; speakChain(rid); return; }
+
+    if(state.engine === 'wasm'){ speakWasmChunk(rid, u, s, a, text); return; }
+
     const utt = new SpeechSynthesisUtterance(text);
-    // pickVoice() prefers a hi-* voice (mobile rule: an Android English
-    // engine given Devanagari text completes SILENTLY — no audio, while the
-    // rAF highlighter keeps moving). Desktop Edge has no Hindi voice, falls
-    // back to its English voice, which DOES vocalize Devanagari — the old
-    // behavior that works on PC stays intact.
-    const v = pickVoice();
+    // pickVoice(text) prefers a hi-* voice only for Devanagari text (mobile
+    // rule: an Android English engine given Devanagari completes SILENTLY);
+    // English text prefers English voices. Desktop Edge stays as before.
+    const v = pickVoice(text);
     if(v){ utt.voice = v; utt.lang = v.lang; }
-    else if(/[\u0900-\u097F]/.test(text)) utt.lang = 'hi-IN';   // no voices at all yet: let the OS choose
+    else if(HAS_DEV.test(text)) utt.lang = 'hi-IN';   // no voices at all yet: let the OS choose
     utt.rate = state.rate;
     utt.volume = 1.0;  // Explicitly set volume to max
     utt.pitch = 1.0;   // Normal pitch
     const myRun = rid, myU = state.unitIdx, myS = state.sentIdx;
+    const t0 = performance.now(); let started = false;
+    const startTimer = setTimeout(() => {
+      if(myRun === state.runId && !started && !synth.paused) suspectNative('no onstart in 1.5s', IS_ANDROID ? 2 : 1);
+    }, 1500);
     utt.onstart = () => {
+      started = true; clearTimeout(startTimer);
       if(myRun !== state.runId) return;
       console.log('TTS Debug: onstart fired — engine ACTUALLY speaking');
     };
@@ -442,15 +596,26 @@ const VVListen = (() => {
         updateWord(u, state.wordPos);
       }
     };
-    utt.onend = () => { if(myRun !== state.runId) return; advanceChunk(); };
+    utt.onend = () => {
+      clearTimeout(startTimer);
+      if(myRun !== state.runId) return;
+      if(text.length >= 20 && performance.now() - t0 < 150){
+        if(suspectNative('onend in <150ms')) return;
+      } else state.nativeSuspect = 0;
+      advanceChunk();
+    };
     utt.onerror = (e) => {
+      clearTimeout(startTimer);
       if(myRun !== state.runId) return;
       // cancel()/pause()-triggered noise — the stop/restart path owns it.
-      if(e && (e.error === 'interrupted' || e.error === 'canceled')) {
+      if(e && (e.error === 'interrupted' || e.error === 'canceled')){
         console.log('TTS Debug: Speech interrupted/cancelled');
         return;
       }
       console.log('TTS Debug: Speech error:', e && e.error, e && e.message);
+      if(e && /synthesis|language|voice-unavailable|not-allowed|network/.test(e.error || '')){
+        if(suspectNative('error ' + e.error, 2)) return;
+      }
       advanceChunk();                                  // real error: skip this chunk, keep going
     };
     state.wordPos = a;
@@ -485,7 +650,15 @@ const VVListen = (() => {
     const rid = ++state.runId;
     stopRaf();
     clearHighlight();
+    if(state.engine === 'wasm'){
+      stopWasmAudio();
+      if(state.actx && state.actx.state === 'suspended' && state.status === 'playing') state.actx.resume();
+      speakChain(rid);                             // nothing to cancel in the OS, no 60ms wait
+      return;
+    }
     synth.cancel();
+    // Tiny delay after cancel() — speak() immediately after cancel() is
+    // silently dropped on some Chromium builds.
     setTimeout(() => {
       if(rid !== state.runId) return;
       state.sentStartedAt = performance.now();
@@ -494,6 +667,7 @@ const VVListen = (() => {
     }, 60);
   }
   function finishRun(){
+    killSrc();
     state.status = 'idle';
     state.unitIdx = 0; state.sentIdx = 0; state.wordPos = null; state.chunkOverride = null;
     stopRaf(); clearHighlight();
@@ -503,15 +677,226 @@ const VVListen = (() => {
     updatePanel();
   }
 
+  /* ---------------- Offline (wasm) engine: playback, cache, prefetch ---------------- */
+  function killSrc(){
+    const s = state.curSrc; state.curSrc = null;
+    if(s){ s.onended = null; try { s.stop(); } catch(e){} try { s.disconnect(); } catch(e){} }
+  }
+  function stopWasmAudio(){
+    killSrc();
+    state.wordTimes = null;
+    if(window.VVTTS && VVTTS.flush) VVTTS.flush();
+  }
+
+  async function ensureOffline(names){
+    await loadHiTTS();
+    if(!window.VVTTS || !VVTTS.supported) throw new Error('this browser lacks Worker, WASM or Cache API');
+    state.ttsReady.clear();
+    const miss = [];
+    for(const n of names){ if(!(await VVTTS.isInstalled(n))) miss.push(n); }
+    if(miss.length){
+      const cached = (await Promise.all(Object.keys(VVTTS.VOICES).map(n => VVTTS.isInstalled(n)))).some(Boolean);
+      const mb = miss.reduce((t, n) => t + (VVTTS.VOICES[n] ? VVTTS.VOICES[n].mb : 60), 0) + (cached ? 0 : 30);
+      const labels = miss.map(n => VVTTS.VOICES[n] ? VVTTS.VOICES[n].label : n).join(' + ');
+      if(!confirm('Download offline voice (' + labels + ', about ' + mb + ' MB, one time)? Wi-Fi is best.')){
+        const e = new Error('declined'); e.declined = true; throw e;
+      }
+      if(VVTTS.persist) VVTTS.persist();
+    }
+    let lastKind = '';
+    await VVTTS.ensureVoices(names, {
+      respectCrash: lsGet(LS_ENGINE, 'auto') !== 'wasm',   // manual "Offline voice" bypasses the crash flag
+      onProgress: p => {
+        const f = p.file || '';
+        const kind = /phonemizer/.test(f) ? 'speech engine' : /starting/.test(f) ? 'starting engine' : /model/.test(f) ? 'voice' : '';
+        if(!kind) return;
+        const mbTxt = p.total ? ' ' + Math.round(p.loaded / 1048576) + '/' + Math.round(p.total / 1048576) + ' MB' : '';
+        setStatus(kind + ' ' + (p.pct || 0) + '%' + mbTxt);
+        if(kind !== lastKind){ lastKind = kind; toast('Offline voice: ' + kind + '...'); }
+      },
+      onError: e => console.log('VVTTS error:', (e && e.message) || e)
+    });
+    names.forEach(n => state.ttsReady.add(n));
+    setStatus('offline voice ready');
+  }
+
+  async function playWasm(fromUnit, fromSent){
+    const gotCtx = unlockAudio();                    // synchronous, still inside the tap
+    const rid = ++state.runId;
+    stopWasmAudio(); stopRaf();
+    state.engine = 'wasm';
+    if(fromUnit != null){ state.unitIdx = fromUnit; state.sentIdx = fromSent || 0; }
+    state.wordPos = null; state.chunkOverride = null; state.chunkLen = 0;
+    state.status = 'playing';
+    updatePanel();
+    try {
+      if(!gotCtx) throw new Error('Web Audio is not available in this browser');
+      await ensureOffline(neededVoices());
+    } catch(err){
+      if(rid !== state.runId || state.status !== 'playing') return;   // user paused/stopped meanwhile
+      console.log('TTS wasm init failed:', err && err.message);
+      state.engine = 'native';
+      if(!supported){
+        state.status = 'idle'; updatePanel();
+        toast('Offline voice failed: ' + (err && err.message));
+        return;
+      }
+      state.forceNative = true;                      // reset when the user changes the engine list
+      toast(err && err.declined ? 'Using device voice (can be silent on some phones)' : 'Offline voice unavailable (' + (err && err.message) + '), using device voice');
+      play(fromUnit, fromSent);
+      return;
+    }
+    if(rid !== state.runId) return;
+    state.wasmErrs = 0;
+    speakChain(rid);
+  }
+
+  function wasmAudio(text, voice){
+    const mr = rateFor(voice).mr;
+    const k = mr.toFixed(2) + '|' + voice + '|' + text;
+    let p = state.synthCache.get(k);
+    if(!p){
+      p = VVTTS.synth(text, mr, voice);
+      p.catch(() => state.synthCache.delete(k));
+      state.synthCache.set(k, p);
+      while(state.synthCache.size > 8) state.synthCache.delete(state.synthCache.keys().next().value);
+    }
+    return p;
+  }
+
+  /* next n chunks, across units, without touching the page (no reveal side effects) */
+  function peekChunks(n){
+    const out = []; let ui = state.unitIdx, si = state.sentIdx + 1;
+    const cap = chunkCap();
+    while(out.length < n && ui < state.units.length){
+      const u = state.units[ui];
+      if(!u._ready){ if(!activateUnit(u, true)) break; }
+      else if(u._cap !== cap) break;
+      if(u.sents && si < u.sents.length){
+        const s = u.sents[si++], t = u.spoken.slice(s.a, s.b);
+        if(t.trim()){ const v = voiceForChunk(t); if(v) out.push({ text: t, voice: v }); }
+      } else { ui++; si = 0; }
+    }
+    return out;
+  }
+
+  function audibleRange(x, sr, th){
+    th = th || 0.01; const pad = Math.round(sr * 0.03);
+    let i = 0, j = x.length;
+    while(i < j && Math.abs(x[i]) < th) i++;
+    while(j > i && Math.abs(x[j - 1]) < th) j--;
+    return [Math.max(0, i - pad), Math.min(x.length, j + pad)];
+  }
+
+  /* exact audio duration spread over words by syllable-ish weight (Latin vowel groups, Devanagari aksharas) */
+  function wordSchedule(spoken, a, b, dur){
+    const out = [], re = /\S+/g, slice = spoken.slice(a, b); let m, total = 0;
+    while((m = re.exec(slice))){
+      const w = m[0];
+      const dev = (w.match(/[ऀ-ॹ](?!्)/g) || []).length;
+      const lat = (w.match(/[aeiouy]+/gi) || []).length;
+      let wt = Math.max(1, dev || lat || Math.ceil(w.length / 3));
+      if(/[,;:]$/.test(w)) wt += 1.5;
+      if(/[।॥.!?]$/.test(w)) wt += 3;
+      out.push({ pos: a + m.index, wt }); total += wt;
+    }
+    let acc = 0;
+    out.forEach(o => { o.t = (acc / total) * dur; acc += o.wt; });
+    return out;
+  }
+
+  async function speakWasmChunk(rid, u, s, a, text){
+    killSrc();
+    const my = ++state.chunkSeq;                     // guards against overlap with advanceChunk / next-sentence
+    const voice = voiceForChunk(text);
+    state.wordPos = a; state.chunkStart = a; state.chunkLen = s.b - a;
+    state.boundarySeen = true; state.wordTimes = null; state.wordIdx = 0; state.curU = u;
+    updateWord(u, a);
+    startWasmRaf(rid);
+    updatePanel();
+    const skip = () => setTimeout(() => { if(rid === state.runId && my === state.chunkSeq) advanceChunk(); }, 0);
+    if(!voice || !/[A-Za-zऀ-ॿ0-9]/.test(text)){ console.log('TTS wasm: skipping chunk (no usable voice or no letters)'); skip(); return; }
+
+    const cur = wasmAudio(text, voice);              // current first, then prefetch (worker queue is serial)
+    peekChunks(2).forEach(c => wasmAudio(c.text, c.voice).catch(() => {}));
+    let r;
+    try { r = await cur; }
+    catch(err){
+      if(rid !== state.runId || my !== state.chunkSeq || (err && err.cancelled)) return;
+      state.wasmErrs++;
+      console.log('TTS wasm synth error (' + state.wasmErrs + '):', err && err.message);
+      if(state.wasmErrs < 3){ skip(); return; }
+      if(state.status !== 'playing') return;
+      state.engine = 'native';
+      if(!supported){ toast('Offline voice failed: ' + (err && err.message)); stop(); return; }
+      state.forceNative = true;
+      toast('Offline voice keeps failing, using device voice');
+      play(state.unitIdx, state.sentIdx);
+      return;
+    }
+    if(rid !== state.runId || my !== state.chunkSeq) return;
+    state.wasmErrs = 0;
+    console.log('TTS wasm [' + voice + ']: ' + r.ms.toFixed(0) + ' ms for ' + (r.samples.length / r.sampleRate).toFixed(2) + ' s audio');
+
+    const ctx = state.actx, sr = r.sampleRate;
+    const [i0, i1] = audibleRange(r.samples, sr);
+    const pcm = r.samples.subarray(i0, i1);
+    const buf = ctx.createBuffer(1, Math.max(1, pcm.length), sr);
+    if(pcm.length) buf.copyToChannel(pcm, 0);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const resid = rateFor(voice).resid;
+    src.playbackRate.value = resid;
+    src.connect(chainFor(voice) ? state.chain.input : ctx.destination);   // narrator chain: English only, only when on
+
+    const gap = /[.!?।॥…]\s*$/.test(text) ? 0.18 : 0.04;
+    state.audioT0 = ctx.currentTime + gap;
+    state.wordTimes = wordSchedule(u.spoken, a, s.b, buf.duration / resid);
+    state.wordIdx = 0;
+    src.onended = () => {
+      if(rid !== state.runId || state.curSrc !== src) return;
+      state.curSrc = null; advanceChunk();
+    };
+    state.curSrc = src;
+    src.start(state.audioT0);
+  }
+
+  function startWasmRaf(rid){
+    stopRaf();
+    const tick = () => {
+      if(rid !== state.runId || state.engine !== 'wasm' || state.status !== 'playing') return;
+      wasmTick();
+      state.rafId = requestAnimationFrame(tick);
+    };
+    state.rafId = requestAnimationFrame(tick);
+  }
+  function wasmTick(){
+    const wt = state.wordTimes;
+    if(!wt || !wt.length || !state.curSrc || !state.curU) return;
+    // audio clock freezes when suspended, so pause stays in sync. Positive syncMs = highlight leads (same as native).
+    const t = state.actx.currentTime - state.audioT0 + (state.syncMs || 0) / 1000;
+    if(t < 0) return;
+    let i = state.wordIdx;
+    while(i + 1 < wt.length && wt[i + 1].t <= t) i++;
+    if(i !== state.wordIdx || state.wordPos !== wt[i].pos){
+      state.wordIdx = i; state.wordPos = wt[i].pos; updateWord(state.curU, state.wordPos);
+    }
+  }
+
   /* ---------------- Transport ---------------- */
   function play(fromUnit, fromSent){
+    if(!state.units.length) {
+      toast('No content to read');
+      return;
+    }
+    const eng = chooseEngine();
+    if(eng === 'wasm'){ playWasm(fromUnit, fromSent); return; }
+    if(IS_ANDROID && lsGet(LS_ENGINE, 'auto') === 'auto' && crashFlagged())
+      toast('Offline voice crashed this phone earlier. Choose "Offline voice" in the engine list to retry.');
+    state.engine = 'native';
+    stopWasmAudio();
     if(!supported) {
       toast('Web Speech API not supported in this browser');
       console.log('TTS Debug: supported=false');
-      return;
-    }
-    if(!state.units.length) {
-      toast('No content to read');
       return;
     }
 
@@ -571,13 +956,20 @@ const VVListen = (() => {
     state.status = 'paused';
     state.pauseAt = performance.now();
     stopRaf();
-    synth.pause();
+    if(state.engine === 'wasm'){ if(state.actx) state.actx.suspend(); }   // freezes audio and the highlight clock together
+    else synth.pause();
     savePos();
     updatePanel();
   }
   function resume(){
     if(state.status !== 'paused') return;
     state.status = 'playing';
+    if(state.engine === 'wasm'){
+      if(state.actx) state.actx.resume();
+      startWasmRaf(state.runId);
+      updatePanel();
+      return;
+    }
     state.pauseAccum += performance.now() - state.pauseAt;
     // Chromium sometimes refuses to resume a long-paused utterance — the
     // safe universal path is cancel + re-speak the current chunk.
@@ -595,6 +987,8 @@ const VVListen = (() => {
     stopRaf();
     clearHighlight();
     savePos();
+    stopWasmAudio();
+    if(state.actx && state.actx.state === 'suspended') state.actx.resume();   // never leave it frozen
     synth.cancel();
     state.status = 'idle';
     state.wordPos = null;
@@ -660,6 +1054,7 @@ const VVListen = (() => {
   }
   function openPanel(opts){
     stop();                                              // never rebuild units under a live playback chain
+    state.synthCache.clear();
     closePanel(true);                                    // silent — stop() already ran above
     state.bookId = opts.bookId;
     state.scopeLabel = opts.scopeLabel || '';
@@ -691,6 +1086,17 @@ const VVListen = (() => {
           <input type="range" id="lp-sync-range" min="0" max="100" step="1" value="50">
         </label>
         <span id="lp-status" style="font-size:10px;color:#888;">voices: ${state.voices.length}</span>
+      </div>
+      <div class="lp-row lp-sub" id="lp-engine-row" style="flex-wrap:wrap;gap:6px;font-size:12px">
+        <select id="lp-engine" title="Engine">
+          <option value="auto">Voice: auto</option>
+          <option value="wasm">Offline voice</option>
+          <option value="native">Device voice</option>
+        </select>
+        <select id="lp-ovoice" title="Offline English voice">
+          ${EN_VOICES.map(v => `<option value="${v.id}">${v.label}</option>`).join('')}
+        </select>
+        <label id="lp-narr-wrap" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="lp-narr"> narrator</label>
       </div>`;
     document.body.appendChild(panel);
     state.panel = panel;
@@ -750,6 +1156,7 @@ const VVListen = (() => {
       else if(e.key.toLowerCase() === 'n' || e.key === 'ArrowRight'){ goNextSentence(); }
     };
     document.addEventListener('keydown', state.keyHandler);
+    wireEnginePanel(panel);
     updatePanel();
   }
   function closePanel(silent){
@@ -761,6 +1168,7 @@ const VVListen = (() => {
   function updatePanel(){
     const p = state.panel;
     if(!p || !document.body.contains(p)) return;
+    refreshEngineUi();
     const playBtn = p.querySelector('#lp-play');
     if(playBtn) playBtn.innerHTML = state.status === 'playing' ? ICON_PAUSE : ICON_PLAY;
     const dlBtn = p.querySelector('#lp-dl');
@@ -773,6 +1181,52 @@ const VVListen = (() => {
     }
     if(state.refreshContinue) state.refreshContinue();   // stop/finish may have made a saved position resumable
   }
+  function refreshEngineUi(){
+    const p = state.panel; if(!p) return;
+    const wasm = chooseEngine() === 'wasm';
+    const show = (sel, on) => { const el = p.querySelector(sel); if(el) el.style.display = on ? '' : 'none'; };
+    show('#lp-voice', !wasm); show('#lp-ovoice', wasm); show('#lp-narr-wrap', wasm);
+  }
+  function wireEnginePanel(p){
+    const eSel = p.querySelector('#lp-engine'), vSel = p.querySelector('#lp-ovoice'), nChk = p.querySelector('#lp-narr');
+    if(!eSel || !vSel || !nChk) return;
+    eSel.value = lsGet(LS_ENGINE, 'auto');
+    vSel.value = enVoice();
+    nChk.checked = state.narrator;
+
+    eSel.onchange = () => {
+      if(eSel.value === 'auto') lsDel(LS_ENGINE); else lsSet(LS_ENGINE, eSel.value);
+      if(eSel.value === 'auto'){ lsDel(LS_BROKEN); state.nativeBroken = false; }
+      state.forceNative = false; state.nativeSuspect = 0;
+      refreshEngineUi();
+      if(state.status === 'playing' || state.status === 'paused'){
+        const u = state.unitIdx, s = state.sentIdx;
+        stop(); play(u, s);                          // a change event is a user gesture, so audio unlock works
+      }
+    };
+    vSel.onchange = async () => {
+      const v = vSel.value;
+      if(state.engine !== 'wasm'){ state.ttsVoice = v; lsSet(LS_EN, v); return; }   // just remember it
+      try {
+        const names = neededVoices().filter(n => n === HI_VOICE).concat([v]);
+        await ensureOffline(names);
+      } catch(err){
+        vSel.value = enVoice();
+        toast(err && err.declined ? 'Voice not downloaded' : 'Voice failed: ' + (err && err.message));
+        return;
+      }
+      state.ttsVoice = v; lsSet(LS_EN, v);
+      state.synthCache.clear();
+      if(window.VVTTS && VVTTS.flush) VVTTS.flush();
+      if(state.status === 'playing') restartCurrentChunk();
+    };
+    nChk.onchange = () => {
+      state.narrator = nChk.checked;
+      lsSet(LS_NARR, nChk.checked ? '1' : '0');
+      if(state.status === 'playing' && state.engine === 'wasm') restartCurrentChunk();
+    };
+    refreshEngineUi();
+  }
   function toggle(opts){
     if(state.panel && document.body.contains(state.panel)) closePanel();
     else openPanel(opts);
@@ -782,6 +1236,7 @@ const VVListen = (() => {
     if(state.status !== 'idle' || state.dl || state.panel){
       state.runId++;
       stopRaf(); clearHighlight();
+      stopWasmAudio(); state.synthCache.clear();
       if(supported) synth.cancel();
       state.status = 'idle';
       if(state.dl) finalizeDownload(false);
@@ -799,7 +1254,7 @@ const VVListen = (() => {
     setTimeout(loadVoices, 800);   // some builds never fire the event on first load
   }
   window.addEventListener('hashchange', detach);
-  window.addEventListener('pagehide', () => { if(supported) synth.cancel(); stopRaf(); });
+  window.addEventListener('pagehide', () => { if(supported) synth.cancel(); stopWasmAudio(); stopRaf(); });
 
   return { supported, toggle, detach, stop, setRate, setVoice, openPanel, _state: state };
 })();

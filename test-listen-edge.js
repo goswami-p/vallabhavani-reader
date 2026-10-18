@@ -12,6 +12,10 @@ const { chromium } = require('playwright');
   const check = (name, cond, extra) => { results.push({ name, pass: !!cond, extra }); console.log((cond ? 'PASS' : 'FAIL') + ' — ' + name + (extra ? ' [' + extra + ']' : '')); };
 
   await page.goto('http://127.0.0.1:8765/#/book/gita/adhyay/1', { waitUntil: 'load' });
+  // This suite exercises the Web Speech (native) path only — pin the engine
+  // so a silent headless engine can't trigger the wasm switch mid-test.
+  await page.evaluate(() => localStorage.setItem('vv_listen_engine', 'native'));
+  await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('.verse-card', { timeout: 15000 });
 
   // 1. Listen button present in topbar
@@ -30,6 +34,9 @@ const { chromium } = require('playwright');
   check('voice select', await page.$('.listen-panel #lp-voice'));
   check('rate select', await page.$('.listen-panel #lp-rate'));
   check('sync slider', await page.$('.listen-panel #lp-sync-range'));
+  check('engine select', await page.$('.listen-panel #lp-engine'));
+  check('offline voice select', await page.$('.listen-panel #lp-ovoice'));
+  check('narrator checkbox', await page.$('.listen-panel #lp-narr'));
   const contHidden = await page.$eval('#lp-continue', el => el.hidden);
   check('continue hidden on fresh book', contHidden === true);
 
@@ -121,7 +128,7 @@ const { chromium } = require('playwright');
   }
 
   // 12. Space toggles play/pause (not while typing)
-  await page.evaluate(() => document.body.focus());
+  await page.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
   await page.keyboard.press('Space');
   await page.waitForTimeout(200);
   st = await page.evaluate(() => VVListen._state.status);

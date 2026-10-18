@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VallabhaVani offline voice test</title>
+<button id="go" style="font-size:20px;padding:14px;margin:12px">Test offline voice (US English)</button>
+<pre id="log" style="white-space:pre-wrap;font-size:12px;padding:0 12px"></pre>
+<script src="/tts/tts-engine.js"></script>
+<script>
+const log = m => { document.getElementById('log').textContent += m + '\n'; };
+window.onerror = (m, s, l) => log('ERR ' + m + ' line ' + l);
+window.onunhandledrejection = e => log('REJ ' + ((e.reason && e.reason.message) || e.reason));
+document.getElementById('go').onclick = async () => {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(); await ctx.resume();
+  const V = 'en_US-lessac-medium';
+  try {
+    log('installed: ' + await VVTTS.isInstalled(V));
+    await VVTTS.ensureVoices([V], { respectCrash: false,
+      onProgress: p => { if(p.pct % 10 === 0) log(p.file + ' ' + p.pct + '%'); },
+      onError: e => log('ENGINE ' + e.message) });
+    log('ready, synthesising');
+    const r = await VVTTS.synth('The old road bent north, toward the mountains.', 1, V);
+    log('synth ' + r.ms.toFixed(0) + ' ms, audio ' + (r.samples.length / r.sampleRate).toFixed(2) + ' s');
+    const b = ctx.createBuffer(1, r.samples.length, r.sampleRate); b.copyToChannel(r.samples, 0);
+    const s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start();
+  } catch(e){ log('FAIL ' + e.message); }
+};
+</script>

@@ -23,7 +23,7 @@
   const supported = typeof Worker === 'function' && typeof WebAssembly === 'object' && 'caches' in self;
 
   /* A tab crash during model compile (low RAM) leaves this flag behind. */
-  const crashedBefore = () => { try { return !!localStorage.getItem('vvTtsCompile'); } catch(e){ return false; } };
+  const crashedBefore = () => { try { const t = +localStorage.getItem('vvTtsCompile'); return !!t && Date.now() - t < 7 * 864e5; } catch(e){ return false; } };
   const setFlag = on => { try { on ? localStorage.setItem('vvTtsCompile', String(Date.now())) : localStorage.removeItem('vvTtsCompile'); } catch(e){} };
 
   async function isInstalled(voice){
