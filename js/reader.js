@@ -302,6 +302,7 @@ function computePages(blocks, containerWidth, containerHeight){
 
 /* ---- Unified reader: a scope (skandh or whole book), optionally starting at one chapter (and one verse within it) ---- */
 function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
+  if(window.VVListen) VVListen.detach();   // kill any running Listen playback from the previous reader instance
   const allChapters = buildScope(book.id, skandhNum);
   const chapters = allChapters.filter(c => c.data && c.data.verses && c.data.verses.length);
   const scopeLabel = skandhNum ? book.skandhTitles.hi[skandhNum-1] : book.title.hi;
@@ -318,6 +319,7 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
       <h1 id="reader-title">${scopeLabel}</h1>
       <button class="icon-btn" id="btn-copy-all" title="Copy chapter">${ICON_COPY}</button>
       <button class="icon-btn" id="btn-share-all" title="Share chapter">${ICON_SHARE}</button>
+      <button class="icon-btn" id="btn-listen" title="सुनें / Listen">${ICON_HEADPHONES}</button>
       <button class="icon-btn" id="btn-bookmark" title="Bookmark">${ICON_BOOKMARK}</button>
       <button class="icon-btn" id="btn-search" title="Find in page">${ICON_SEARCH}</button>
     </div>
@@ -634,6 +636,28 @@ function renderReader(app, book, skandhNum, startChapterKey, startVerseNum){
   };
 
   wireVerseCardActions(app, verseIndex, book.id);
+
+  /* ---- Listen (read-aloud) — engine in js/listen.js. reveal() brings a
+     verse's elements into the DOM before the engine queries them: a no-op
+     in vertical modes (everything is already rendered), a page-jump in
+     horizontal paginated mode where only the current page exists. ---- */
+  const listenBtn = app.querySelector('#btn-listen');
+  if(listenBtn){
+    if(window.VVListen && VVListen.supported){
+      listenBtn.onclick = () => VVListen.toggle({
+        book, chapters, bookId: book.id, scopeLabel, content,
+        reveal: (chKey, vnum) => {
+          if(content.querySelector(`[data-vkey="${chKey}-${vnum}"], .flow-p[data-chkey="${chKey}"][data-vnum="${vnum}"]`)) return;
+          const ch = chapters.find(c => c.key === chKey);
+          if(!ch) return;
+          const idx = ch.data.verses.findIndex(v => v.num === vnum);
+          if(idx >= 0) jumpTo(chKey, idx, 'auto');
+        }
+      });
+    } else {
+      listenBtn.style.display = 'none';
+    }
+  }
 
   /* ---- Whole-book verse index — lets the right-edge scroll pad represent
      position across all of `chapters` (the entire book, for a non-skandh

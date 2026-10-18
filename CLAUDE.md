@@ -68,3 +68,38 @@ intended, for every verse touched — not just one or two spot-checks** — befo
 committing/deploying. This is what caught the bug on the second pass (chapter
 1 verses 2-4 were never fully re-verified this way the first time, which is
 why the mistake shipped).
+
+## Listen (read-aloud) — `js/listen.js`
+
+Reusable engine + player panel (`window.VVListen`) using the Web Speech API —
+no server/API key. Wired from the reader topbar (`#btn-listen` in
+`renderReader`, reader.js) and detached on every route change (`render()` in
+app.js, `renderReader` itself, and listen.js's own `hashchange`/`pagehide`
+handlers — keep all three). Script tag goes AFTER reader.js in index.html.
+
+Key invariants if this code is touched:
+
+- **Selectors mirror the renderer.** `buildUnits` reads the real DOM
+  (`.verse-card[data-vkey] …` in card mode, `.flow-p[data-chkey][data-vnum]`
+  in flow/paginated mode). If `verseCardHtml`/`verseFlowHtml` markup changes,
+  update `buildUnits` in the same commit.
+- **Reformat's `hi` fields hold HTML** — the raw-data fallback path (elements
+  not in the DOM) strips tags before speaking; the normal path uses
+  `textContent` so it's already clean. Don't "simplify" the strip away.
+- **`runId` staleness guard:** every play/stop/restart bumps it; utterance
+  handlers bail if stale. `synth.cancel()` + 60ms delay before re-speak
+  (Chromium drops speak-immediately-after-cancel); pause = cancel, resume =
+  re-speak the current chunk from `currentChunkStartWord()` via
+  `chunkOverride` — don't try `synth.pause()/resume()` on long utterances.
+- **No fallback voice is persisted** at load — Edge's online "Natural"
+  voices arrive after local ones; `pickVoice()` re-scans live so they win.
+  Only an explicit user pick writes `vv_listen_voice`.
+- **localStorage keys:** `vv_listen_voice`, `vv_listen_rate`,
+  `vv_listen_sync`, `vv_listen_pos_<bookId>` (position is verse-level,
+  cleared with `''` on natural finish).
+- Word highlight = CSS Custom Highlight API (`::highlight(vv-word)` in
+  style.css); `updateWord` maps spoken index → shown offset via `u.map`.
+
+Tested by `test-listen-edge.js` (Playwright, `channel: 'msedge'`, against a
+local static server) — 56 checks incl. the reformat route with a seeded
+`vv_reformat_book`. Re-run it after touching listen.js/reader.js wiring.

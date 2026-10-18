@@ -665,3 +665,43 @@ input[type=color]{ width:44px; height:34px; border:none; background:none; }
 @media (min-width: 700px){
   .verse-pager{ height: calc(100vh - 170px); }
 }
+
+/* ---------- Listen (read-aloud) ---------- */
+.listen-panel{
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+  z-index: 50; width: min(520px, calc(100vw - 20px));
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  border-radius: 16px; box-shadow: 0 6px 28px rgba(50,35,10,.22);
+  padding: .55rem .7rem .5rem; font-size: .88rem;
+}
+.listen-panel .lp-row{ display:flex; align-items:center; gap:.45rem; }
+.listen-panel .lp-sub{ margin-top:.45rem; padding-top:.4rem; border-top:1px solid var(--card-border); gap:.6rem; }
+.listen-panel .lp-btn{
+  display:flex; align-items:center; justify-content:center;
+  width:36px; height:36px; flex-shrink:0; border:none; border-radius:50%;
+  background: var(--sky-2); color: var(--ink); cursor:pointer;
+}
+.listen-panel .lp-btn:active{ background: var(--orange); color:#fff; }
+.listen-panel .lp-play{ background: var(--orange); color:#fff; width:40px; height:40px; }
+.listen-panel .lp-play:active{ background: var(--orange-2); }
+.listen-panel .lp-dl.recording{ background:#d64545; color:#fff; animation: lp-rec-pulse 1.2s infinite; }
+@keyframes lp-rec-pulse{ 50%{ opacity:.65; } }
+@media (prefers-reduced-motion: reduce){ .listen-panel .lp-dl.recording{ animation:none; } }
+.listen-panel select{
+  border:1px solid var(--card-border); border-radius:10px; background: var(--sky);
+  color: var(--ink); font-size:.8rem; padding:.3rem .4rem; max-width: 40vw;
+  font-family: inherit;
+}
+.listen-panel .lp-ref{
+  font-size:.75rem; color: var(--ink-soft); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0;
+}
+.listen-panel .lp-continue{
+  border:1px solid var(--orange); background:none; color: var(--orange);
+  border-radius:14px; font-size:.72rem; padding:.2rem .6rem; cursor:pointer;
+  white-space:nowrap; flex-shrink:0; font-family:inherit;
+}
+.listen-panel .lp-sync{ display:flex; align-items:center; gap:.35rem; font-size:.72rem; color:var(--ink-soft); flex-shrink:0; }
+.listen-panel .lp-sync input[type=range]{ width:80px; accent-color: var(--orange); }
+::highlight(vv-word){ background:#ffe066; color:#1a1a2e; }

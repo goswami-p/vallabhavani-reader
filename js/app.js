@@ -411,6 +411,7 @@ function render(){
   // to fire on its own it silently rewrites the URL back to the old reading
   // position ~250ms later, even though the correct new page is on screen.
   cancelReaderHashSync();
+  if(window.VVListen) VVListen.detach();   // route changed — kill any running Listen playback
 
   if(parts.length === 0) return renderHome(app);
   if(parts[0] === 'reformat') return renderReformat(app);
