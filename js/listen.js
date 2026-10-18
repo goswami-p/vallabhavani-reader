@@ -73,10 +73,15 @@ const VVListen = (() => {
   }
   function refreshVoiceSelect(){
     const sel = state.panel && state.panel.querySelector('#lp-voice');
-    if(!sel || !state.voices.length) return;
+    const status = state.panel && state.panel.querySelector('#lp-status');
+    if(!sel || !state.voices.length) {
+      if(status) status.textContent = `voices: ${state.voices.length}`;
+      return;
+    }
     sel.innerHTML = voiceOptionsHtml();
     const cur = pickVoice();
     if(cur) sel.value = cur.voiceURI;
+    if(status) status.textContent = `voices: ${state.voices.length}`;
   }
   function pickVoice(){
     // 1. User's explicit choice
@@ -642,6 +647,7 @@ const VVListen = (() => {
           <span>सिंक</span>
           <input type="range" id="lp-sync-range" min="0" max="100" step="1" value="50">
         </label>
+        <span id="lp-status" style="font-size:10px;color:#888;">voices: ${state.voices.length}</span>
       </div>`;
     document.body.appendChild(panel);
     state.panel = panel;
