@@ -77,11 +77,13 @@ const fsp = require('fs');
   await exportMp3('cold-export');
   const after1 = await page.evaluate(() => ({
     exp: !!VVListen._state.exp, gdm: !!window.__gdmTouched,
-    status: VVListen._state.status, ready: [...VVListen._state.ttsReady]
+    status: VVListen._state.status, ready: [...VVListen._state.ttsReady],
+    last: VVListen._state.lastExport
   }));
   log('voice downloaded as part of export', after1.ready.length > 0, JSON.stringify(after1.ready));
   log('getDisplayMedia never touched', !after1.gdm);
   log('export state cleared, idle', !after1.exp && after1.status === 'idle', JSON.stringify(after1));
+  log('export peak within ceiling (no clipping)', !!after1.last && after1.last.peak <= 0.842 && after1.last.rawPeak <= 1.0, JSON.stringify(after1.last));
 
   // 2) Fantasy Storyteller: one-time download via the voice picker, then a
   //    2nd MP3 rendered with the cloned voice.

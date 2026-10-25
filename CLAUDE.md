@@ -118,10 +118,15 @@ Key invariants if this code is touched:
   panel open), schedules via OfflineAudioContext, and words get times from
   `audibleRange()`/`wordSchedule()`. A chunk failure counts `wasmErrs`; after
   3 strikes the engine falls back to native (status must still be `playing`).
-- **Narrator chain:** `narratorChain(text, lang)` applies a grit/presence
-  WebAudio chain (PITCH 0.92 etc.) to English/Latin chunks only when the
+- **Narrator chain:** `narratorChain(text, lang)` applies a bass/presence/
+  air WebAudio chain (PITCH 0.94 etc.) to English/Latin chunks only when the
   narrator checkbox (`vv_listen_narrator`) is on — Devanagari stays clean.
-  Chain is rebuilt per chunk via `chainFor()`.
+  Chain is rebuilt per chunk via `chainFor()`. Current tuning (matched
+  offline against the approved "N3-bass-full" reference): highpass 80 Hz →
+  lowshelf +3 dB @110 → chest +1.5 dB @95 → de-mud -0.5 dB @320 → presence
+  +0.2 dB @1800 → +1.8 dB @3000 → air highshelf +7 dB @6 kHz, parallel grit
+  (bandpass 1.8 kHz → tanh drive → 0.05) and HF drive (highpass 3.5 kHz →
+  tanh drive → 0.07), out gain 1.3, limiter last.
 - **Wasm init must not stomp pause:** every wasm catch/fallback path bails
   unless `state.status === 'playing'` in addition to the runId check (a
   dismissed download confirm mid-test used to restart playback over pause).
@@ -164,6 +169,23 @@ Key invariants if this code is touched:
   `.lp-dl.recording` CSS pulse needs that class). `exportSpoken(u)` queries
   the DOM WITHOUT reveal side effects; fallback strips tags from `u.raw`
   (reformat `hi` holds HTML).
+- **Clipping guard — loudness stays, peaks must not clip:** the narrator
+  chain's warm EQ can push a chunk to ~1.05 peak; hard-clamping that (at the
+  DAC in live playback, or in the MP3 encoder) made the voice crack ("fat
+  rahi"). `safetyLimiter(ctx)` — DynamicsCompressor, threshold -1.5 dB, knee
+  2, ratio 20, attack 1 ms, release 120 ms — now sits at the END of
+  `narratorChain()` (so live chain playback AND export are covered), is used
+  for the no-narrator live path via `state.actxLimiter`, and is inserted in
+  the export's `renderExportChunk()`. Below the threshold it changes NOTHING:
+  pitch (PITCH 0.94), EQ colour and loudness are untouched — the user
+  explicitly wants the same loudness and the same relative pitch. The export
+  then scales (never clamps!) any chunk still above `EXP_CEIL = 0.8414`
+  (-1.5 dBFS) linearly, and records
+  `state.lastExport = {rawPeak, peak, secs, chunks, bytes, name}` — the
+  wasm/mobile tests assert `rawPeak <= 1.0` and `peak <= 0.842`.
+  Measured on the fantasy voice: raw peak 1.046 → 0.990 (limiter) → 0.841
+  (ceiling); loudness -14.85 → -14.75 LUFS (inaudible), true peak
+  -0.18 → -1.76 dBTP.
 
 Tested by `test-listen-edge.js` (Playwright, `channel: 'msedge'`, against a
 local static server, engine pinned to native via `vv_listen_engine`;

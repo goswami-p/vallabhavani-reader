@@ -61,7 +61,7 @@ const VVListen = (() => {
     { id: 'en_IN-navgurukul-medium', label: 'Indian English' },
     { id: 'en_GB-fantasy-medium', label: 'Fantasy Storyteller' }
   ];
-  const PITCH = 0.92;      // <1 = deeper narrator voice, English chunks only, only when narrator is on
+  const PITCH = 0.94;      // <1 = deeper narrator voice, English chunks only, only when narrator is on
   const WASM_CAP = 110;    // chars per chunk for the wasm engine (native keeps MAX_CHUNK = 50)
   const RE_DEV = /[ऀ-ॿ]/g, RE_LAT = /[A-Za-z]/g;   // counting only, use with match()
   const HAS_DEV = /[ऀ-ॿ]/;                          // testing
@@ -73,6 +73,7 @@ const VVListen = (() => {
     audioT0: 0, wordTimes: null, wordIdx: 0, chunkSeq: 0, wasmErrs: 0,
     nativeSuspect: 0, nativeBroken: false, forceNative: false,
     synthCache: new Map(), ttsReady: new Set(),
+    actxLimiter: null, lastExport: null,
     ttsVoice: lsGet(LS_EN, EN_VOICES[0].id),
     narrator: lsGet(LS_NARR, '0') === '1'
   });
@@ -85,29 +86,66 @@ const VVListen = (() => {
     try{ const t = +localStorage.getItem('vvTtsCompile'); return !!t && Date.now() - t < 7 * 864e5; }catch(e){ return false; }
   }
 
-  /* narrator colour: warm low end, presence, parallel mid-band grit */
+  /* Safety limiter: catches peaks above -1.5 dBFS so the signal never hits
+     full scale (the chain's warm EQ can push a chunk to ~1.05, which used to
+     hard-clip at the DAC / in the MP3 encoder and sounded "cracking").
+     Gain-only — pitch, EQ colour and loudness are untouched below the
+     threshold, so the voice keeps the exact character it had. */
+  function safetyLimiter(ctx){
+    const c = ctx.createDynamicsCompressor();
+    c.threshold.value = -1.5; c.knee.value = 2; c.ratio.value = 20;
+    c.attack.value = 0.001; c.release.value = 0.12;
+    return c;
+  }
+  /* narrator colour: warm (but NOT boomy) low end, presence, a touch of air,
+     parallel mid-band grit.
+     Tuned offline against the approved reference ("N3-bass-full"): chest
+     weight comes from a +3.5 dB low shelf at 120 Hz (above the 40-120 Hz
+     rumble the old +6 dB @180 Hz shelf created), the mids stay restrained so
+     the voice keeps its breathiness, and the top end gets a clear "air" shelf
+     plus a light HF drive for crisp consonants. Gain/EQ only — pitch, speed
+     and loudness stay as they are. */
   function narratorChain(ctx){
     const input = ctx.createGain(), out = ctx.createGain();
-    const low = ctx.createBiquadFilter();  low.type = 'lowshelf'; low.frequency.value = 180; low.gain.value = 6;
-    const pres = ctx.createBiquadFilter(); pres.type = 'peaking'; pres.frequency.value = 2400; pres.Q.value = 0.9; pres.gain.value = 3;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 80; hp.Q.value = 0.7;
+    const low = ctx.createBiquadFilter();  low.type = 'lowshelf'; low.frequency.value = 110; low.gain.value = 3;
+    const chest = ctx.createBiquadFilter(); chest.type = 'peaking'; chest.frequency.value = 95; chest.Q.value = 1.2; chest.gain.value = 1.5;
+    const mud = ctx.createBiquadFilter();  mud.type = 'peaking'; mud.frequency.value = 320; mud.Q.value = 1.0; mud.gain.value = -0.5;
+    const pres = ctx.createBiquadFilter(); pres.type = 'peaking'; pres.frequency.value = 1800; pres.Q.value = 0.9; pres.gain.value = 0.2;
+    const pres2 = ctx.createBiquadFilter(); pres2.type = 'peaking'; pres2.frequency.value = 3000; pres2.Q.value = 1.1; pres2.gain.value = 1.8;
+    const air = ctx.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 6000; air.gain.value = 7;
     const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.frequency.value = 1800; band.Q.value = 0.7;
     const shaper = ctx.createWaveShaper();
     const k = 40, n = 1024, curve = new Float32Array(n);
     for(let i = 0; i < n; i++){ const x = i * 2 / (n - 1) - 1; curve[i] = Math.tanh(k * x) / Math.tanh(k); }
     shaper.curve = curve; shaper.oversample = '2x';
-    const grit = ctx.createGain(); grit.gain.value = 0.12;
-    input.connect(low); low.connect(pres); pres.connect(out);
+    const grit = ctx.createGain(); grit.gain.value = 0.05;
+    // HF "sparkle" drive: gentle saturation above 3.5 kHz (console-style
+    // presence) — the 22 kHz Piper model has very little energy up there, so
+    // this is what makes the consonants read as crisp instead of soft.
+    const hpDrive = ctx.createBiquadFilter(); hpDrive.type = 'highpass'; hpDrive.frequency.value = 3500;
+    const shaper2 = ctx.createWaveShaper();
+    const k2 = 6, n2 = 1024, curve2 = new Float32Array(n2);
+    for(let i = 0; i < n; i++){ const x = i * 2 / (n - 1) - 1; curve2[i] = Math.tanh(k2 * x) / Math.tanh(k2); }
+    shaper2.curve = curve2; shaper2.oversample = '2x';
+    const drive = ctx.createGain(); drive.gain.value = 0.07;
+    const lim = safetyLimiter(ctx);
+    out.gain.value = 1.3;
+    input.connect(hp); hp.connect(low); low.connect(chest); chest.connect(mud); mud.connect(pres); pres.connect(pres2); pres2.connect(air); air.connect(out);
     low.connect(band); band.connect(shaper); shaper.connect(grit); grit.connect(out);
-    return { input, output: out };
+    air.connect(hpDrive); hpDrive.connect(shaper2); shaper2.connect(drive); drive.connect(out);
+    out.connect(lim);          // <- limiter last: nothing downstream can clip
+    return { input, output: lim };
   }
 
   /* Must run synchronously inside the user's tap (playWasm calls it before any await). */
   function unlockAudio(){
     const AC = window.AudioContext || window.webkitAudioContext;
     if(!AC) return false;
-    if(!state.actx){ state.actx = new AC(); state.chain = null; }
+    if(!state.actx){ state.actx = new AC(); state.chain = null; state.actxLimiter = null; }
     if(state.actx.state === 'suspended') state.actx.resume();
     if(!state.chain){ state.chain = narratorChain(state.actx); state.chain.output.connect(state.actx.destination); }
+    if(!state.actxLimiter){ state.actxLimiter = safetyLimiter(state.actx); state.actxLimiter.connect(state.actx.destination); }
     try {
       const b = state.actx.createBuffer(1, 1, 22050), s = state.actx.createBufferSource();
       s.buffer = b; s.connect(state.actx.destination); s.start(0);
@@ -847,7 +885,7 @@ const VVListen = (() => {
     const src = ctx.createBufferSource(); src.buffer = buf;
     const resid = rateFor(voice).resid;
     src.playbackRate.value = resid;
-    src.connect(chainFor(voice) ? state.chain.input : ctx.destination);   // narrator chain: English only, only when on
+    src.connect(chainFor(voice) ? state.chain.input : (state.actxLimiter || ctx.destination));   // narrator chain: English only, only when on
 
     const gap = /[.!?।॥…]\s*$/.test(text) ? 0.18 : 0.04;
     state.audioT0 = ctx.currentTime + gap;
@@ -1011,6 +1049,7 @@ const VVListen = (() => {
      (share-sheet fallback only where a[download] is unsupported). Works on
      mobile and desktop; Stop cancels at the next checkpoint. */
   const EXP_CANCELLED = { name: 'ExportCancelled' };
+  const EXP_CEIL = 0.8414;      // -1.5 dBFS ceiling: peaks are scaled down (never hard-clipped)
   let lameLoad = null;
   function loadLame(){
     if(window.lamejs) return Promise.resolve(window.lamejs);
@@ -1059,8 +1098,10 @@ const VVListen = (() => {
   async function renderExportChunk(p, sr){
     const dur = p.gap + (p.pcm.length / p.sr) / p.resid + 0.05;
     const off = new OfflineAudioContext(1, Math.ceil(dur * sr), sr);
-    let dest = off.destination;
-    if(p.chain){ const c = narratorChain(off); c.output.connect(off.destination); dest = c.input; }
+    const lim = safetyLimiter(off);
+    lim.connect(off.destination);
+    let dest = lim;
+    if(p.chain){ const c = narratorChain(off); c.output.connect(lim); dest = c.input; }
     const buf = off.createBuffer(1, p.pcm.length, p.sr);
     buf.copyToChannel(p.pcm, 0);
     const src = off.createBufferSource();
@@ -1081,7 +1122,7 @@ const VVListen = (() => {
     const throwIfCancelled = () => {
       if(state.exp && state.exp.cancelled){ toast('MP3 रद्द / Export cancelled'); throw EXP_CANCELLED; }
     };
-    let lame = null, enc = null, baseSr = 0, done = 0, secs = 0;
+    let lame = null, enc = null, baseSr = 0, done = 0, secs = 0, rawPeak = 0, finalPeak = 0;
     const slices = [];
     try{
       await ensureOffline(neededVoices());                 // prompts the one-time offline-voice download
@@ -1114,6 +1155,18 @@ const VVListen = (() => {
           }, baseSr);
           const ch = rendered.getChannelData(0);
           secs += ch.length / baseSr;
+          // Peak safety: scale the chunk down if it rises above the ceiling
+          // (linear = no distortion, unlike the old hard clamp that made the
+          // voice crack). The limiter in the chain already does most of it.
+          let peak = 0;
+          for(let i = 0; i < ch.length; i++){ const a = ch[i] < 0 ? -ch[i] : ch[i]; if(a > peak) peak = a; }
+          if(peak > rawPeak) rawPeak = peak;
+          if(peak > EXP_CEIL){
+            const g = EXP_CEIL / peak;
+            for(let i = 0; i < ch.length; i++) ch[i] *= g;
+            peak = EXP_CEIL;
+          }
+          if(peak > finalPeak) finalPeak = peak;
           for(let i = 0; i < ch.length; i += 1152){
             const n = Math.min(1152, ch.length - i);
             for(let j = 0; j < n; j++){
@@ -1133,6 +1186,7 @@ const VVListen = (() => {
       const blob = new Blob(slices, { type: 'audio/mpeg' });
       if(blob.size < 512){ toast('MP3 बनाना विफल / MP3 encode failed'); return; }
       const name = 'VallabhaVani-MP3-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.mp3';
+      state.lastExport = { rawPeak, peak: finalPeak, secs: Math.round(secs), chunks: done, bytes: blob.size, name };
       saveBlob(blob, name);
       toast('MP3 सेव: ' + (blob.size >= 1048576 ? (blob.size / 1048576).toFixed(1) + ' MB' : Math.round(blob.size / 1024) + ' KB') + ' · ' + Math.round(secs) + 's');
     } catch(err){

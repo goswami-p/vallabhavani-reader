@@ -93,6 +93,8 @@ const { chromium } = require('playwright');
       const after = await page.evaluate(() => ({ exp: !!VVListen._state.exp, gdm: !!window.__gdmTouched, status: VVListen._state.status }));
       log('getDisplayMedia never touched', !after.gdm);
       log('export state cleared, still idle', !after.exp && after.status === 'idle', JSON.stringify(after));
+      const le = await page.evaluate(() => VVListen._state.lastExport);
+      log('export peak within ceiling (no clipping)', !!le && le.peak <= 0.842 && le.rawPeak <= 1.0, JSON.stringify(le));
       exportPass = pass;
     } catch (e) {
       console.log('FAIL — no download event [' + e.message + ']');
