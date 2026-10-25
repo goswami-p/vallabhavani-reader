@@ -57,7 +57,8 @@ const VVListen = (() => {
   const EN_VOICES = [
     { id: 'en_GB-northern_english_male-medium', label: 'British English' },
     { id: 'en_US-lessac-medium', label: 'US English' },
-    { id: 'en_IN-navgurukul-medium', label: 'Indian English' }
+    { id: 'en_IN-navgurukul-medium', label: 'Indian English' },
+    { id: 'en_GB-fantasy-medium', label: 'Fantasy Storyteller' }
   ];
   const PITCH = 0.92;      // <1 = deeper narrator voice, English chunks only, only when narrator is on
   const WASM_CAP = 110;    // chars per chunk for the wasm engine (native keeps MAX_CHUNK = 50)

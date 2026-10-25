@@ -11,7 +11,8 @@
     'en_US-lessac-medium':              { label: 'US English',      mb: 60 },
     'en_GB-northern_english_male-medium': { label: 'British English', mb: 60 },
     'en_IN-navgurukul-medium':          { label: 'Indian English',  mb: 61 },
-    'hi_IN-rohan-medium':               { label: 'Hindi',           mb: 60 }
+    'hi_IN-rohan-medium':               { label: 'Hindi',           mb: 60 },
+    'en_GB-fantasy-medium':             { label: 'Fantasy Storyteller', mb: 61 }
   };
   let worker = null, workerStarted = false, nid = 0;
   const pending = new Map();
