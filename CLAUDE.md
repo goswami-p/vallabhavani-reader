@@ -147,10 +147,43 @@ Key invariants if this code is touched:
 - **Panel engine row:** `#lp-engine` (auto/wasm/native), `#lp-ovoice`
   (wasm voice picker, wasm-only), `#lp-narr` (narrator). `#lp-voice` hides
   under wasm. `refreshEngineUi` keeps them in sync.
+- **Download = offline MP3 export (no share-screen/tab capture):**
+  `downloadMp3()` synthesizes every sentence of the panel scope in the
+  worker (chunked via `sentencesOf(spoken, WASM_CAP)` regardless of live
+  engine), renders each chunk through a per-chunk `OfflineAudioContext`
+  (narrator chain + speed residual + playback-matching gap), streams into
+  vendored lamejs (`js/lame.min.js`, lazy-injected by `loadLame()`, global
+  `lamejs`), and saves via `a[download]` (share-sheet only if `download`
+  unsupported). Voice download happens INSIDE the export (via
+  `ensureOffline(neededVoices())`), so a fresh device gets the model as part
+  of the flow. `state.exp` (not `state.dl`) marks the run: `play()` is
+  guarded while exporting, `stop()`/`detach()` set `exp.cancelled` and the
+  loop throws sentinel `EXP_CANCELLED` at checkpoints (cancelled → silent,
+  declined voice → toast, other errors → toast). Never call
+  `getDisplayMedia` again for this — the button is `.lp-btn.lp-dl` (the
+  `.lp-dl.recording` CSS pulse needs that class). `exportSpoken(u)` queries
+  the DOM WITHOUT reveal side effects; fallback strips tags from `u.raw`
+  (reformat `hi` holds HTML).
 
 Tested by `test-listen-edge.js` (Playwright, `channel: 'msedge'`, against a
-local static server, engine pinned to native via `vv_listen_engine`) and
+local static server, engine pinned to native via `vv_listen_engine`;
+step 17 = MP3 export aborts cleanly on a declined voice download with
+`getDisplayMedia` instrumented to prove it is never touched) and
 `test-wasm-reformat.js` (same harness, engine forced to wasm, random English
-passage through the reformat route, download confirm auto-accepted; first run
-downloads the ~90 MB voice+engine locally). Phone smoke page: `/tts/test.html`.
+passage through the reformat route; ends with a full MP3 export — asserts
+download event, `.mp3` frame sync `0xFF`, no share-screen; voice confirm
+auto-accepted, first run downloads the ~90 MB voice+engine locally) and
+`test-mp3-mobile.js` (Pixel 5 emulation, fresh profile: cold export
+downloads the voice itself, then Fantasy Storyteller via the picker + a 2nd
+export). Also `test-listen-core.js` (extracts `cleanWithMap`/`sentencesOf`
+from source — `sentencesOf`'s `chunkCap` reference must keep the
+`typeof === 'function'` guard or the extraction eval throws). Phone smoke
+page: `/tts/test.html`.
+
+**Reformat fill/click race (mobile test):** background re-renders
+(`vvLoadOverrides`, auth-state callbacks → `refreshReaderIfOpen()`) can wipe
+the `#rf-text` form between a separate `page.fill` and `page.click` (button
+then runs on an empty textarea → hash never changes). Fill + click inside
+ONE synchronous `page.evaluate` — JS single-threading makes the wipe
+impossible in between.
 Re-run the matching suite after touching listen.js/tts/*/reader.js wiring.

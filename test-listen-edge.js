@@ -197,18 +197,19 @@ const { chromium } = require('playwright');
   // NOTE: Escape stops playback but does NOT close the panel — leave it
   // open for the download test below (clicking #btn-listen would toggle it shut).
 
-  // 17. Download button graceful path — getDisplayMedia rejected -> toast, no crash
-  // (the share picker is browser chrome; we can only assert the reject path)
-  // Panel is still open from step 16.
+  // 17. Download button = offline MP3 export. Nothing is cached in this
+  // fresh profile, so the flow asks to download the voice first — Playwright
+  // auto-dismisses dialogs, i.e. the confirm is declined → must end cleanly:
+  // idle, no export state, and getDisplayMedia (share-screen) never touched.
   await page.evaluate(() => {
-    navigator.mediaDevices.getDisplayMedia = () => Promise.reject(new Error('NotAllowedError'));
+    navigator.mediaDevices.getDisplayMedia = () => { window.__gdmTouched = true; return Promise.reject(new Error('NotAllowedError')); };
   });
   await page.click('#lp-dl');
-  await page.waitForTimeout(500);
-  st = await page.evaluate(() => ({ status: VVListen._state.status, dl: !!VVListen._state.dl }));
-  check('download cancel handled (no crash, still idle)', st.status === 'idle' && st.dl === false);
+  await page.waitForFunction(() => !VVListen._state.exp, { timeout: 20000 }).catch(() => {});
+  st = await page.evaluate(() => ({ status: VVListen._state.status, exp: !!VVListen._state.exp, gdm: !!window.__gdmTouched }));
+  check('mp3 export aborts cleanly on declined voice download (no share-screen)', st.status === 'idle' && st.exp === false && !st.gdm, JSON.stringify(st));
   const toastText = await page.evaluate(() => { const t = document.querySelector('.toast'); return t ? t.textContent : ''; });
-  check('cancel toast shown', /Recording cancelled|रद्द/.test(toastText || ''), toastText);
+  check('voice-needed toast shown', /voice|Voice|वॉइस|आवाज़|MP3/i.test(toastText || ''), toastText);
 
   // 18. Close panel via X
   await page.click('#lp-close');

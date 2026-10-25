@@ -73,6 +73,32 @@ const { chromium } = require('playwright');
     await page.keyboard.press('Escape');
   }
 
+  // MP3 export — offline render → lamejs → real .mp3 download, no share-screen.
+  let exportPass = false;
+  {
+    let pass = true;
+    const log = (name, cond, extra) => { console.log((cond ? 'PASS' : 'FAIL') + ' — ' + name + (extra ? ' [' + extra + ']' : '')); if (!cond) pass = false; };
+    await page.evaluate(() => {
+      navigator.mediaDevices.getDisplayMedia = () => { window.__gdmTouched = true; return Promise.reject(new Error('NotAllowedError')); };
+    });
+    const dlP = page.waitForEvent('download', { timeout: 120000 });
+    await page.click('#lp-dl');
+    try {
+      const dl = await dlP;
+      log('mp3 download event fires', true, dl.suggestedFilename());
+      log('.mp3 filename', /\.mp3$/i.test(dl.suggestedFilename()), dl.suggestedFilename());
+      const buf = require('fs').readFileSync(await dl.path());
+      log('mp3 has bytes', buf.length > 8000, buf.length + ' bytes');
+      log('mp3 frame sync 0xFF', buf[0] === 0xFF && (buf[1] & 0xE0) === 0xE0, 'hdr=' + buf[0].toString(16) + ' ' + buf[1].toString(16));
+      const after = await page.evaluate(() => ({ exp: !!VVListen._state.exp, gdm: !!window.__gdmTouched, status: VVListen._state.status }));
+      log('getDisplayMedia never touched', !after.gdm);
+      log('export state cleared, still idle', !after.exp && after.status === 'idle', JSON.stringify(after));
+      exportPass = pass;
+    } catch (e) {
+      console.log('FAIL — no download event [' + e.message + ']');
+    }
+  }
+
   await browser.close();
-  process.exit(ok ? 0 : 1);
+  process.exit(ok && exportPass ? 0 : 1);
 })().catch(e => { console.error('FATAL', e); process.exit(1); });

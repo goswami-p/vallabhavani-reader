@@ -8,9 +8,10 @@
    fallback because Edge's natural voices usually send no onboundary events
    (a sync slider trims the estimate). Every playback run gets a runId so
    stale onend/onerror/rAF callbacks from a cancelled run are ignored.
-   Audio download captures the tab's audio (getDisplayMedia + MediaRecorder)
-   while the whole text is spoken — the browser's own share picker must have
-   "Share tab audio" ticked. */
+   Audio download = offline MP3 export: every sentence of the panel scope is
+   synthesized in the worker, streamed through lamejs (js/lame.min.js) and
+   handed to the browser as an .mp3 file — no share-screen/tab capture, works
+   on mobile and desktop alike. */
 
 const ICON_HEADPHONES = `<svg class="icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12.5v-2.2a6.5 6.5 0 0 1 13 0v2.2"/><rect x="2.3" y="11.6" width="3.4" height="5.2" rx="1.5"/><rect x="14.3" y="11.6" width="3.4" height="5.2" rx="1.5"/></svg>`;
 const ICON_PLAY = `<svg class="icon" viewBox="0 0 20 20" width="17" height="17" fill="currentColor" stroke="none"><path d="M6 4.2v11.6L16 10z"/></svg>`;
@@ -45,7 +46,7 @@ const VVListen = (() => {
     panel: null, keyHandler: null,
     rafId: null, sentStartedAt: 0, pauseAccum: 0, pauseAt: 0,
     boundarySeen: false, scrollAt: 0, chunkOverride: null, chunkLen: 0, chunkStart: 0,
-    dl: null                          // active audio-download run, if any
+    exp: null                         // active MP3 export, if any {cancelled}
   };
 
   /* ================= OFFLINE (WASM) ENGINE: constants + helpers ================= */
@@ -305,8 +306,12 @@ const VVListen = (() => {
 
   /* Sentences of a spoken string as {a,b} offsets, each chunk force-capped at
      the engine's chunk size at a word boundary (long utterances freeze ~15 s in). */
-  function sentencesOf(spoken){
-    const CAP = chunkCap();
+  function sentencesOf(spoken, cap){
+    // cap override: the MP3 export always chunks at the wasm size regardless
+    // of the live engine. The typeof guard keeps test-listen-core.js's
+    // function-extraction eval working (chunkCap is an arrow const, not
+    // extractable by its `function name` grab).
+    const CAP = cap || (typeof chunkCap === 'function' ? chunkCap() : MAX_CHUNK);
     const raw = [];
     const re = /[^.!?।॥…\n]+[.!?।॥…]+(?=\s|$)|[^.!?।॥…\n]+(?=\n|$)/g;
     let m;
@@ -669,7 +674,6 @@ const VVListen = (() => {
     state.unitIdx = 0; state.sentIdx = 0; state.wordPos = null; state.chunkOverride = null;
     stopRaf(); clearHighlight();
     if(state.bookId) lsSet(POS_PREFIX + state.bookId, '');   // nothing left to continue
-    if(state.dl) finalizeDownload(true);
     toast('सुनना पूर्ण / Finished');
     updatePanel();
   }
@@ -885,6 +889,10 @@ const VVListen = (() => {
       toast('No content to read');
       return;
     }
+    if(state.exp){
+      toast('MP3 बन रहा है — रोकने के लिए Stop दबाएँ / MP3 export running');
+      return;
+    }
     const eng = chooseEngine();
     if(eng === 'wasm'){ playWasm(fromUnit, fromSent); return; }
     if(IS_ANDROID && lsGet(LS_ENGINE, 'auto') === 'auto' && crashFlagged())
@@ -979,7 +987,7 @@ const VVListen = (() => {
     else play(state.unitIdx >= state.units.length ? 0 : state.unitIdx, 0);
   }
   function stop(){
-    if(state.status === 'idle' && !state.dl) return;
+    if(state.status === 'idle' && !state.exp) return;
     state.runId++;
     stopRaf();
     clearHighlight();
@@ -989,57 +997,155 @@ const VVListen = (() => {
     synth.cancel();
     state.status = 'idle';
     state.wordPos = null;
-    if(state.dl) finalizeDownload(false);
+    if(state.exp) state.exp.cancelled = true;   // MP3 export aborts at its next checkpoint
     updatePanel();
   }
 
-  /* ---------------- Audio download (tab-audio capture) ----------------
-     speechSynthesis exposes no audio stream, so the only keyless way to get
-     a file is recording the tab's own audio while the text is spoken. The
-     browser's share picker opens — user must select THIS tab and tick
-     "Share tab audio" (a manual step no script can click). */
-  async function downloadAudio(){
-    if(!supported) return;
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
-      toast('इस ब्राउज़र में ऑडियो कैप्चर उपलब्ध नहीं / Capture not supported'); return;
-    }
-    stop();
-    let stream;
-    try{
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    }catch(e){ toast('रिकॉर्डिंग रद्द / Recording cancelled'); return; }
-    const audioTracks = stream.getAudioTracks();
-    if(!audioTracks.length){
-      stream.getTracks().forEach(t => t.stop());
-      toast('टैब चुनते समय "Share tab audio" टिक करें / Tick "Share tab audio"');
-      return;
-    }
-    const mime = (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) ? 'audio/webm;codecs=opus' : '';
-    const rec = new MediaRecorder(new MediaStream(audioTracks), mime ? { mimeType: mime } : undefined);
-    const chunks = [];
-    rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
-    state.dl = { rec, chunks, mime, stream };
-    rec.start(250);
-    toast('रिकॉर्डिंग चालू — पूरा पाठ पढ़ा जाएगा / Recording — speaking full text');
-    updatePanel();
-    play(0, 0);   // full scope from the start; Stop button ends it early and still saves
+  /* ---------------- Audio download: offline MP3 export ----------------
+     The wasm engine already holds the voice, so no share-screen/tab capture
+     is needed: every sentence of the panel scope is synthesized in the
+     worker, each chunk is rendered through a tiny per-chunk
+     OfflineAudioContext (narrator chain + speed residual, exactly matching
+     live playback), streamed into the vendored lamejs encoder
+     (js/lame.min.js, lazy-loaded) and saved as .mp3 via a[download]
+     (share-sheet fallback only where a[download] is unsupported). Works on
+     mobile and desktop; Stop cancels at the next checkpoint. */
+  const EXP_CANCELLED = { name: 'ExportCancelled' };
+  let lameLoad = null;
+  function loadLame(){
+    if(window.lamejs) return Promise.resolve(window.lamejs);
+    return lameLoad || (lameLoad = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = '/js/lame.min.js';
+      s.onload = () => window.lamejs ? res(window.lamejs) : (lameLoad = null, rej(new Error('lamejs global missing')));
+      s.onerror = () => { lameLoad = null; rej(new Error('/js/lame.min.js failed to load')); };
+      document.head.appendChild(s);
+    }));
   }
-  async function finalizeDownload(naturalEnd){
-    const dl = state.dl;
-    if(!dl) return;
-    state.dl = null;
-    try{ if(dl.rec.state !== 'inactive') dl.rec.stop(); }catch(e){ /* already stopped */ }
-    try{ await Promise.race([new Promise(res => { const t = setTimeout(res, 2000); dl.rec.addEventListener('stop', () => { clearTimeout(t); res(); }, { once: true }); }), new Promise(res => setTimeout(res, 2500))]); }catch(e){ /* whatever — chunks below decide */ }
-    dl.stream.getTracks().forEach(t => t.stop());
-    const blob = new Blob(dl.chunks, { type: dl.mime || 'audio/webm' });
-    if(blob.size < 512){ toast('ऑडियो नहीं मिला — "Share tab audio" टिक किया था? / No audio captured'); return; }
+  function saveBlob(blob, name){
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = 'VallabhaVani-listen-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.webm';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 8000);
-    toast((naturalEnd ? 'डाउनलोड तैयार / Saved: ' : 'अब तक का रिकॉर्डेड: ') + Math.round(blob.size / 1024) + ' KB');
+    if('download' in a){                                   // every current mobile + desktop browser
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } else if(typeof File === 'function' && navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: blob.type })] })){
+      navigator.share({ files: [new File([blob], name, { type: blob.type })] }).catch(() => {});
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } else {
+      window.open(url, '_blank');
+    }
+  }
+  // Spoken text for export without any reveal side effects: real DOM
+  // textContent when the unit is rendered (reformat + card mode always are),
+  // else the raw data with HTML tags stripped (reformat's `hi` holds HTML).
+  function exportSpoken(u){
+    const root = state.content;
+    const els = [];
+    if(root){
+      u.sels.forEach(sel => {
+        root.querySelectorAll(sel).forEach(el => { if(!els.includes(el)) els.push(el); });
+      });
+    }
+    if(els.length){
+      let shown = '';
+      els.forEach(el => { shown += el.textContent + ' '; });
+      return cleanWithMap(shown).spoken;
+    }
+    return cleanWithMap(String(u.raw || '').replace(/<[^>]*>/g, ' ')).spoken;
+  }
+  // One chunk: [gap] + silence-trimmed PCM, played at rate residual through
+  // the narrator chain when live playback would have used it.
+  async function renderExportChunk(p, sr){
+    const dur = p.gap + (p.pcm.length / p.sr) / p.resid + 0.05;
+    const off = new OfflineAudioContext(1, Math.ceil(dur * sr), sr);
+    let dest = off.destination;
+    if(p.chain){ const c = narratorChain(off); c.output.connect(off.destination); dest = c.input; }
+    const buf = off.createBuffer(1, p.pcm.length, p.sr);
+    buf.copyToChannel(p.pcm, 0);
+    const src = off.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = p.resid;
+    src.connect(dest);
+    src.start(p.gap);
+    return off.startRendering();
+  }
+  async function downloadMp3(){
+    if(state.exp) return;                                  // already exporting
+    if(!state.units.length){ toast('No content to read'); return; }
+    if(!wasmCapable()){ toast('इस ब्राउज़र में MP3 एक्सपोर्ट उपलब्ध नहीं / MP3 export needs a modern browser'); return; }
+    stop();                                                // playback (and any stale run) out of the way
+    unlockAudio();                                         // sync, still in the tap: chainFor() must see the chain
+    state.exp = { cancelled: false };
+    updatePanel();
+    const throwIfCancelled = () => {
+      if(state.exp && state.exp.cancelled){ toast('MP3 रद्द / Export cancelled'); throw EXP_CANCELLED; }
+    };
+    let lame = null, enc = null, baseSr = 0, done = 0, secs = 0;
+    const slices = [];
+    try{
+      await ensureOffline(neededVoices());                 // prompts the one-time offline-voice download
+      lame = await loadLame();
+      const queue = [];                                    // {text, voice} — voice picked only after ttsReady is set
+      for(const u of state.units){
+        const spoken = exportSpoken(u);
+        if(!spoken) continue;
+        for(const s of sentencesOf(spoken, WASM_CAP)){
+          const text = spoken.slice(s.a, s.b);
+          if(!text.trim() || !/[A-Za-zऀ-ॿ0-9]/.test(text)) continue;
+          const voice = voiceForChunk(text);
+          if(voice) queue.push({ text, voice });
+        }
+      }
+      if(!queue.length){ toast('कोई पाठ नहीं / Nothing to export'); return; }
+      const int16 = new Int16Array(1152);
+      for(const q of queue){
+        throwIfCancelled();
+        const { mr, resid } = rateFor(q.voice);
+        const r = await VVTTS.synth(q.text, mr, q.voice);
+        done++;
+        const [i0, i1] = audibleRange(r.samples, r.sampleRate);
+        if(i1 > i0){
+          if(!baseSr){ baseSr = r.sampleRate; enc = new lame.Mp3Encoder(1, baseSr, 64); }
+          const rendered = await renderExportChunk({
+            pcm: r.samples.slice(i0, i1), sr: r.sampleRate, resid,
+            gap: /[.!?।॥…]\s*$/.test(q.text) ? 0.18 : 0.04,
+            chain: chainFor(q.voice)
+          }, baseSr);
+          const ch = rendered.getChannelData(0);
+          secs += ch.length / baseSr;
+          for(let i = 0; i < ch.length; i += 1152){
+            const n = Math.min(1152, ch.length - i);
+            for(let j = 0; j < n; j++){
+              const v = Math.max(-1, Math.min(1, ch[i + j]));
+              int16[j] = v < 0 ? (v * 32768) | 0 : (v * 32767) | 0;
+            }
+            const out = enc.encodeBuffer(n === 1152 ? int16 : int16.subarray(0, n));
+            if(out.length) slices.push(out);
+          }
+        }
+        setStatus('MP3 ' + done + '/' + queue.length);
+      }
+      throwIfCancelled();
+      if(!enc){ toast('कोई ऑडियो नहीं बना / No audio generated'); return; }
+      const tail = enc.flush();
+      if(tail.length) slices.push(tail);
+      const blob = new Blob(slices, { type: 'audio/mpeg' });
+      if(blob.size < 512){ toast('MP3 बनाना विफल / MP3 encode failed'); return; }
+      const name = 'VallabhaVani-MP3-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.mp3';
+      saveBlob(blob, name);
+      toast('MP3 सेव: ' + (blob.size >= 1048576 ? (blob.size / 1048576).toFixed(1) + ' MB' : Math.round(blob.size / 1024) + ' KB') + ' · ' + Math.round(secs) + 's');
+    } catch(err){
+      if(err === EXP_CANCELLED){ /* toast already shown at the checkpoint */ }
+      else if(state.exp && state.exp.cancelled){ toast('MP3 रद्द / Export cancelled'); }
+      else if(err && err.declined) toast('वॉइस डाउनलोड रद्द — MP3 के लिए ऑफ़लाइन वॉइस ज़रूरी / Voice download declined');
+      else toast('MP3 नहीं बना / MP3 failed: ' + ((err && err.message) || err));
+      console.log('TTS MP3 export failed:', (err && err.message) || err);
+    } finally{
+      state.exp = null;
+      setStatus(EN_VOICES.length + ' offline · ' + state.voices.length + ' device');
+      updatePanel();
+    }
   }
 
   /* ---------------- Panel (UI component) ---------------- */
@@ -1077,7 +1183,7 @@ const VVListen = (() => {
       <div class="lp-row">
         <button class="lp-btn lp-play" id="lp-play" title="चलाएँ / Pause (Space)">${ICON_PLAY}</button>
         <button class="lp-btn" id="lp-stop" title="रोकें / Stop (Esc)">${ICON_STOP_SQ}</button>
-        <button class="lp-btn" id="lp-dl" title="ऑडियो डाउनलोड करें / Download audio">${ICON_DOWNLOAD}</button>
+        <button class="lp-btn lp-dl" id="lp-dl" title="MP3 में डाउनलोड करें (कोई शेयर-स्क्रीन नहीं) / Download as MP3">${ICON_DOWNLOAD}</button>
         <select id="lp-voice" title="आवाज़ / Voice">${voiceOptionsHtml()}</select>
         <select id="lp-rate" title="गति / Speed">
           ${[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(r => `<option value="${r}" ${r === state.rate ? 'selected' : ''}>${r}×</option>`).join('')}
@@ -1103,7 +1209,7 @@ const VVListen = (() => {
 
     panel.querySelector('#lp-play').onclick = togglePlay;
     panel.querySelector('#lp-stop').onclick = stop;
-    panel.querySelector('#lp-dl').onclick = downloadAudio;
+    panel.querySelector('#lp-dl').onclick = downloadMp3;
     panel.querySelector('#lp-close').onclick = () => closePanel();
     panel.querySelector('#lp-voice').onchange = async (e) => {
       const val = e.target.value;
@@ -1196,12 +1302,12 @@ const VVListen = (() => {
     const playBtn = p.querySelector('#lp-play');
     if(playBtn) playBtn.innerHTML = state.status === 'playing' ? ICON_PAUSE : ICON_PLAY;
     const dlBtn = p.querySelector('#lp-dl');
-    if(dlBtn) dlBtn.classList.toggle('recording', !!state.dl);
+    if(dlBtn) dlBtn.classList.toggle('recording', !!state.exp);
     const ref = p.querySelector('#lp-ref');
     if(ref){
       const u = state.units[state.unitIdx];
-      if(state.status === 'idle' && !state.dl) ref.textContent = state.scopeLabel || '—';
-      else if(u) ref.textContent = (state.dl ? '⏺ ' : '') + (state.scopeLabel ? state.scopeLabel + ' · ' : '') + verseRefLabel({ id: state.bookId }, u.chKey, u.vnum);
+      if(state.status === 'idle' && !state.exp) ref.textContent = state.scopeLabel || '—';
+      else if(u) ref.textContent = (state.exp ? '⏺ ' : '') + (state.scopeLabel ? state.scopeLabel + ' · ' : '') + verseRefLabel({ id: state.bookId }, u.chKey, u.vnum);
     }
     if(state.refreshContinue) state.refreshContinue();   // stop/finish may have made a saved position resumable
   }
@@ -1230,13 +1336,13 @@ const VVListen = (() => {
   }
   // Route change / reader re-render / tab close — kill everything. Idempotent.
   function detach(){
-    if(state.status !== 'idle' || state.dl || state.panel){
+    if(state.status !== 'idle' || state.exp || state.panel){
       state.runId++;
       stopRaf(); clearHighlight();
       stopWasmAudio(); state.synthCache.clear();
       if(supported) synth.cancel();
       state.status = 'idle';
-      if(state.dl) finalizeDownload(false);
+      if(state.exp) state.exp.cancelled = true;
     }
     if(state.panel){ state.panel.remove(); state.panel = null; }
     if(state.keyHandler){ document.removeEventListener('keydown', state.keyHandler); state.keyHandler = null; }
